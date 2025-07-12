@@ -1,8 +1,8 @@
-# 🎯 PokerBot - GPU-Native Poker AI
+# 🎯 PokerTrainer - GPU-Native Poker AI
 
 <div align="center">
 
-![PokerBot Logo](https://via.placeholder.com/300x150/0066CC/FFFFFF?text=PokerBot+AI)
+![PokerTrainer Logo](https://via.placeholder.com/300x150/0066CC/FFFFFF?text=PokerTrainer+AI)
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/JAX-GPU%20Accelerated-orange.svg)](https://github.com/google/jax)
@@ -32,8 +32,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/poker-bot.git
-cd poker-bot
+git clone https://github.com/Sn0wfly/PokerTrainer.git
+cd PokerTrainer
 
 # Install dependencies
 pip install -r requirements.txt
@@ -46,7 +46,7 @@ pip install -e .
 
 ```bash
 # Test the system
-poker-bot evaluate
+python -m poker_bot.cli evaluate
 
 # Should show:
 # ✅ Hand evaluator working correctly
@@ -57,20 +57,20 @@ poker-bot evaluate
 
 ```bash
 # Quick training run
-poker-train --iterations 10000 --batch-size 512 --players 2 --gpu
+python -m poker_bot.cli train --iterations 10000 --batch-size 512 --players 2 --gpu
 
 # Full training (recommended)
-poker-train --iterations 100000 --batch-size 1024 --players 2 --gpu
+python -m poker_bot.cli train --iterations 100000 --batch-size 1024 --players 2 --gpu
 ```
 
 ### 4. Play Poker!
 
 ```bash
 # Play against your trained AI
-poker-play --model models/final_model.pkl --hands 100
+python -m poker_bot.cli play --model models/final_model.pkl --hands 100
 
 # Play with aggressive strategy
-poker-play --model models/final_model.pkl --hands 100 --aggressive
+python -m poker_bot.cli play --model models/final_model.pkl --hands 100 --aggressive
 ```
 
 ## 🔥 Vast.ai Deployment (Recommended)
@@ -85,7 +85,7 @@ For GPU training without owning hardware:
 # 3. SSH into instance
 # 4. Run deployment script
 
-wget https://raw.githubusercontent.com/your-username/poker-bot/main/deploy/vast_ai_setup.sh
+wget https://raw.githubusercontent.com/Sn0wfly/PokerTrainer/main/deploy/vast_ai_setup.sh
 chmod +x vast_ai_setup.sh
 sudo ./vast_ai_setup.sh
 ```
@@ -111,14 +111,14 @@ tmux attach -t training
 scp user@vast-instance:/opt/poker_env/models/final_model.pkl ./local_model.pkl
 
 # Test locally
-poker-play --model local_model.pkl --hands 10
+python -m poker_bot.cli play --model local_model.pkl --hands 10
 ```
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        PokerBot                            │
+│                     PokerTrainer                           │
 ├─────────────────────────────────────────────────────────────┤
 │  🤖 Bot (Real-time player)                                │
 │  ├── Policy: Trained MCCFR strategy                       │
@@ -162,10 +162,10 @@ poker-play --model local_model.pkl --hands 10
 
 ```bash
 # Basic training
-poker-train --iterations 100000 --batch-size 1024
+python -m poker_bot.cli train --iterations 100000 --batch-size 1024
 
 # Advanced training
-poker-train \
+python -m poker_bot.cli train \
   --iterations 100000 \
   --batch-size 1024 \
   --players 2 \
@@ -174,17 +174,17 @@ poker-train \
   --resume checkpoints/checkpoint_50000.pkl
 
 # Configuration file
-poker-train --config-file config.yaml
+python -m poker_bot.cli train --config-file config/training_config.yaml
 ```
 
 ### Playing Commands
 
 ```bash
 # Basic play
-poker-play --model models/final_model.pkl --hands 100
+python -m poker_bot.cli play --model models/final_model.pkl --hands 100
 
 # Advanced play
-poker-play \
+python -m poker_bot.cli play \
   --model models/final_model.pkl \
   --hands 1000 \
   --opponents 2 \
@@ -198,13 +198,13 @@ poker-play \
 
 ```bash
 # List available models
-poker-bot list-models
+python -m poker_bot.cli list-models
 
 # Evaluate model performance
-poker-bot evaluate --model models/final_model.pkl
+python -m poker_bot.cli evaluate --model models/final_model.pkl
 
 # System information
-poker-bot --help
+python -m poker_bot.cli --help
 ```
 
 ## 🔬 Technical Details
@@ -233,7 +233,7 @@ poker-bot --help
 
 ```bash
 # Run all tests
-pytest
+python test_complete_setup.py
 
 # Run with coverage
 pytest --cov=poker_bot
@@ -267,10 +267,11 @@ flake8 poker_bot/
 ### For Online Poker Platforms
 
 ```python
-from poker_bot import PokerBot, BotConfig
+from poker_bot.bot import PokerBot
+from poker_bot.engine import GameConfig
 
 # Configure bot
-config = BotConfig(
+config = GameConfig(
     model_path="models/final_model.pkl",
     thinking_time=0.5,
     aggression_factor=1.0,
@@ -342,9 +343,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 💬 Support
 
-- **Documentation**: [Wiki](https://github.com/your-username/poker-bot/wiki)
-- **Issues**: [GitHub Issues](https://github.com/your-username/poker-bot/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/poker-bot/discussions)
+- **Documentation**: [Wiki](https://github.com/Sn0wfly/PokerTrainer/wiki)
+- **Issues**: [GitHub Issues](https://github.com/Sn0wfly/PokerTrainer/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Sn0wfly/PokerTrainer/discussions)
 
 ---
 
@@ -352,6 +353,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **⭐ Star this repo if you find it useful! ⭐**
 
-Made with ❤️ by the PokerBot team
+Made with ❤️ for the poker AI community
 
 </div> 
