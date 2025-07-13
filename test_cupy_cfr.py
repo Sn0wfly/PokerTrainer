@@ -97,8 +97,15 @@ def performance_comparison():
     Compare different batch sizes and matrix sizes
     """
     print("=== CuPy CFR Performance Test ===")
-    print("GPU:", cp.cuda.get_device_name())
-    print("Memory:", cp.get_default_memory_pool().get_limit() / 1024**3, "GB")
+    
+    # Get GPU device info
+    device = cp.cuda.runtime.getDevice()
+    device_props = cp.cuda.runtime.getDeviceProperties(device)
+    print("GPU:", device_props['name'].decode('utf-8'))
+    
+    # Get memory info
+    free_mem, total_mem = cp.cuda.runtime.memGetInfo()
+    print("Memory:", total_mem / 1024**3, "GB total,", free_mem / 1024**3, "GB free")
     
     # Test different configurations
     configs = [
