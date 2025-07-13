@@ -139,7 +139,7 @@ class SimpleMCCFRTrainer:
             # Recursive call
             key, subkey = jr.split(key)
             action_values = action_values.at[action_idx].set(
-                self.cfr_recursive(new_state, player_id, new_reach_probs, subkey)
+                self.cfr_recursive(new_state, new_state.current_player, new_reach_probs, subkey)
             )
         
         # Calculate node value
