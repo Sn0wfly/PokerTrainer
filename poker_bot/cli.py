@@ -52,8 +52,11 @@ def evaluate_hand_jax(hole_cards: jnp.ndarray, community_cards: jnp.ndarray) -> 
     straight_check = jnp.convolve(straight_ranks, jnp.ones(5), mode='valid')
     is_straight = jnp.max(straight_check) >= 5
     
-    # Count pairs, trips, quads
-    pair_counts = jnp.bincount(rank_counts[rank_counts > 0], length=5)
+    # Count pairs, trips, quads using JAX-compatible operations
+    # Instead of boolean indexing, count occurrences of each rank count
+    pair_counts = jnp.zeros(5, dtype=jnp.int32)
+    for i in range(1, 5):  # Count ranks that appear 1,2,3,4 times
+        pair_counts = pair_counts.at[i].set(jnp.sum(rank_counts == i))
     
     # Hand rankings (higher = better)
     # 8: Straight Flush, 7: Four of a Kind, 6: Full House, 5: Flush
