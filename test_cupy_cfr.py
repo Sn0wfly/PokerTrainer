@@ -107,12 +107,14 @@ def performance_comparison():
     free_mem, total_mem = cp.cuda.runtime.memGetInfo()
     print("Memory:", total_mem / 1024**3, "GB total,", free_mem / 1024**3, "GB free")
     
-    # Test different configurations
+    # Test different configurations (optimized for RTX 3090 24GB memory)
     configs = [
-        (500, 2000),    # Small batch, medium matrix
-        (1000, 2000),   # Medium batch, medium matrix  
-        (500, 3000),    # Small batch, large matrix
-        (1000, 3000),   # Medium batch, large matrix (should saturate GPU)
+        (100, 1000),    # Small batch, small matrix (~400MB)
+        (200, 1000),    # Medium batch, small matrix (~800MB)
+        (100, 1500),    # Small batch, medium matrix (~900MB)
+        (150, 1500),    # Medium batch, medium matrix (~1.3GB)
+        (200, 1500),    # Large batch, medium matrix (~1.8GB)
+        (100, 2000),    # Small batch, large matrix (~1.6GB)
     ]
     
     for batch_size, matrix_size in configs:
