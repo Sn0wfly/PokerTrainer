@@ -385,29 +385,61 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
         
         for iteration in range(1, iterations + 1):
             try:
+                # Add detailed logging for first few iterations
+                if iteration <= 10 or iteration % 100 == 0:
+                    logger.info(f"🎯 Starting iteration {iteration}/{iterations}")
+                
                 # Start new REAL poker game
+                if iteration <= 5:
+                    logger.info(f"Creating new game for iteration {iteration}")
+                
                 game_state = poker_engine.new_game()
                 games_played += 1
                 iteration_start_time = time.time()
+                
+                if iteration <= 5:
+                    logger.info(f"Game created successfully for iteration {iteration}")
                 
                 # Play through the ENTIRE poker game
                 game_decisions = 0
                 max_game_decisions = 50  # Safety limit
                 
+                if iteration <= 5:
+                    logger.info(f"Starting game decisions loop for iteration {iteration}")
+                
                 while not game_state.is_terminal() and game_decisions < max_game_decisions:
                     current_player = game_state.current_player
                     
+                    if iteration <= 3:
+                        logger.info(f"  Decision {game_decisions}: Current player {current_player}")
+                    
                     # Skip if player is not active
                     if not poker_engine.is_player_active(game_state, current_player):
+                        if iteration <= 3:
+                            logger.info(f"  Player {current_player} not active, breaking")
                         break
                     
                     # Get REAL information set from poker engine
-                    info_set = poker_engine.get_information_set(game_state, current_player)
+                    try:
+                        info_set = poker_engine.get_information_set(game_state, current_player)
+                        if iteration <= 3:
+                            logger.info(f"  Got info set: {info_set}")
+                    except Exception as e:
+                        logger.error(f"  Failed to get info set: {e}")
+                        break
                     
                     # Get REAL valid actions from poker engine
-                    valid_actions = poker_engine.get_valid_actions(game_state, current_player)
+                    try:
+                        valid_actions = poker_engine.get_valid_actions(game_state, current_player)
+                        if iteration <= 3:
+                            logger.info(f"  Valid actions: {valid_actions}")
+                    except Exception as e:
+                        logger.error(f"  Failed to get valid actions: {e}")
+                        break
                     
                     if not valid_actions:
+                        if iteration <= 3:
+                            logger.info(f"  No valid actions, breaking")
                         break
                     
                     # Convert valid actions to training format
@@ -470,13 +502,28 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                         action_idx = jr.randint(jr.PRNGKey(iteration + current_player + game_decisions), (), 0, len(valid_actions))
                         chosen_action = valid_actions[action_idx]
                         
+                        if iteration <= 3:
+                            logger.info(f"  Chosen action: {chosen_action}")
+                        
                         # Apply action to continue REAL poker game
                         game_state = poker_engine.apply_action(game_state, chosen_action)
                         game_decisions += 1
                         
+                        if iteration <= 3:
+                            logger.info(f"  Action applied, game_decisions: {game_decisions}")
+                        
+                        # Safety timeout for game decisions
+                        if game_decisions >= max_game_decisions:
+                            if iteration <= 10:
+                                logger.warning(f"  Game decisions reached limit: {max_game_decisions}")
+                            break
+                            
                     except Exception as e:
                         logger.warning(f"Training step failed: {e}, continuing...")
                         break
+                
+                if iteration <= 5:
+                    logger.info(f"Game finished for iteration {iteration}, decisions: {game_decisions}")
                 
                 training_data['iteration'] = iteration
                 successful_iterations += 1
@@ -494,6 +541,13 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                                f"Success rate: {successful_iterations/iteration:.1%} | "
                                f"Avg time/iter: {avg_iteration_time:.3f}s")
                 
+                # Early progress check
+                if iteration == 10:
+                    elapsed = time.time() - start_time
+                    logger.info(f"🎯 First 10 iterations completed in {elapsed:.1f}s")
+                    logger.info(f"   Average time per iteration: {elapsed/10:.3f}s")
+                    logger.info(f"   Projected time for 100k iterations: {(elapsed/10)*100000/3600:.1f} hours")
+                
                 # Save checkpoint
                 if iteration % save_interval == 0:
                     checkpoint_path = save_path.replace('.pkl', f'_checkpoint_{iteration}.pkl')
@@ -501,8 +555,16 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                         pickle.dump(training_data, f)
                     logger.info(f"NLHE Checkpoint saved: {checkpoint_path}")
                 
+                # Timeout protection - kill if single iteration takes too long
+                iteration_time = time.time() - iteration_start_time
+                if iteration_time > 30:  # 30 seconds per iteration max
+                    logger.error(f"Iteration {iteration} took {iteration_time:.1f}s, this is too slow!")
+                    break
+                
             except Exception as e:
                 logger.error(f"Iteration {iteration} failed: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
         
         # Save final model
