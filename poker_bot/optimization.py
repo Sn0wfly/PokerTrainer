@@ -365,8 +365,9 @@ class OptimizedCFRTrainer:
         # Memory management
         self.memory_monitor = MemoryMonitor("OptimizedCFR")
         self.batch_manager = AdaptiveBatchManager(
-            base_batch_size=512,
-            memory_threshold=0.8
+            base_batch_size=2048,
+            memory_threshold=0.8,
+            max_batch_size=16384
         )
         
         # Training state
@@ -504,15 +505,18 @@ def get_optimal_optimization_config() -> OptimizationConfig:
     memory_info = get_memory_usage()
     
     # Calculate gradient accumulation steps based on memory
-    if memory_info['available_memory_gb'] > 16:
+    # With 24GB RTX 3090, we can use smaller accumulation steps
+    if memory_info['available_memory_gb'] > 20:
+        gradient_accumulation_steps = 2
+    elif memory_info['available_memory_gb'] > 16:
         gradient_accumulation_steps = 4
     elif memory_info['available_memory_gb'] > 8:
         gradient_accumulation_steps = 8
     else:
         gradient_accumulation_steps = 16
     
-    # Cache size based on available memory
-    cache_size = min(2000, int(memory_info['available_memory_gb'] * 50))
+    # Cache size based on available memory - be more aggressive with large VRAM
+    cache_size = min(5000, int(memory_info['available_memory_gb'] * 100))
     
     config = OptimizationConfig(
         gradient_accumulation_steps=gradient_accumulation_steps,

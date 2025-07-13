@@ -26,8 +26,8 @@ class MemoryConfig:
     MEMORY_CRITICAL_THRESHOLD = 0.95  # 95% of available memory
     
     # Batch size adjustment for memory constraints
-    MIN_BATCH_SIZE = 64
-    MAX_BATCH_SIZE = 4096
+    MIN_BATCH_SIZE = 512
+    MAX_BATCH_SIZE = 16384
     BATCH_SIZE_REDUCTION_FACTOR = 0.7
 
 def get_memory_usage() -> Dict[str, float]:
@@ -259,7 +259,7 @@ class MemoryMonitor:
 class MemoryEfficientDataLoader:
     """Data loader with memory-aware batching"""
     
-    def __init__(self, data: np.ndarray, batch_size: int = 1024, 
+    def __init__(self, data: np.ndarray, batch_size: int = 2048, 
                  adaptive_batching: bool = True):
         self.data = data
         self.initial_batch_size = batch_size
@@ -320,10 +320,10 @@ def create_memory_efficient_trainer(config: Dict[str, Any]) -> Callable:
 class AdaptiveBatchManager:
     """Adaptive batch size manager for memory-constrained training"""
     
-    def __init__(self, base_batch_size: int = 512, 
+    def __init__(self, base_batch_size: int = 2048, 
                  memory_threshold: float = 0.8,
-                 min_batch_size: int = 64,
-                 max_batch_size: int = 4096):
+                 min_batch_size: int = 512,
+                 max_batch_size: int = 16384):
         self.base_batch_size = base_batch_size
         self.memory_threshold = memory_threshold
         self.min_batch_size = min_batch_size

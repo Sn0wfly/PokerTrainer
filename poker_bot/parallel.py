@@ -313,12 +313,17 @@ def get_optimal_parallel_config() -> ParallelConfig:
     """Get optimal parallel configuration based on available hardware"""
     device_info = get_device_info()
     
-    # Calculate optimal batch size per device
-    # Rule of thumb: 256-512 per device for good GPU utilization
-    batch_size_per_device = 512 if device_info['num_devices'] > 1 else 1024
+    # Calculate optimal batch size per device for 24GB RTX 3090
+    # With 18GB+ VRAM available, we can use much larger batch sizes
+    if device_info['num_devices'] > 1:
+        # Multi-GPU: distribute larger batches
+        batch_size_per_device = 4096
+    else:
+        # Single GPU: maximize batch size for RTX 3090 24GB
+        batch_size_per_device = 8192
     
-    # Gradient accumulation for large effective batch sizes
-    gradient_accumulation_steps = max(1, 4 // device_info['num_devices'])
+    # Reduced gradient accumulation since we have large batch sizes
+    gradient_accumulation_steps = max(1, 2 // device_info['num_devices'])
     
     config = ParallelConfig(
         num_devices=device_info['num_devices'],
