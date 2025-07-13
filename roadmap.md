@@ -55,24 +55,150 @@ GPU-accelerated poker AI using JAX + CFR algorithms for No Limit Texas Hold'em t
 - **Cost analysis**: $2-4/hour on vast.ai vs $144 total for Pluribus
 - **Goal**: 20-100 games/sec (1-3 hours for 100k games)
 
-#### **5.2 Code Optimization for H100**
-- **JAX JIT compilation**: 2-5x speedup expected
-- **Mixed precision (FP16/FP8)**: 2-3x speedup expected  
-- **Memory bandwidth optimization**: Leverage 3TB/s HBM3
-- **Tensor Core utilization**: Maximize 3,200+ TFLOPS
-- **Multi-GPU scaling**: NVLink 600-900 GB/s bandwidth
+#### **5.2 MEDIUM OPTIMIZATIONS (2-4 hours) - 20-100x Speedup**
 
-#### **5.3 Algorithm Optimization**
-- **Vectorized CFR**: Batch multiple games simultaneously
-- **Sparse matrix operations**: Leverage cuSPARSE for info sets
-- **Memory-efficient data structures**: Optimize for HBM3
-- **Asynchronous training**: Overlap computation and I/O
+##### **5.2.1 Vectorized Game Simulation**
+- **Target file**: `poker_bot/cli.py` → `train_holdem()` function
+- **Current**: Sequential game processing (1 game at a time)
+- **Optimization**: 
+  ```python
+  # Replace: for iteration in range(iterations)
+  # With: batch_games = jax.vmap(simulate_poker_game)(batch_keys)
+  ```
+- **Implementation**: Vectorize `poker_engine.new_game()` and decision loops
+- **Expected speedup**: 10-50x (process 100-1000 games simultaneously)
 
-#### **5.4 Performance Targets**
-- **H100 target**: 50-100 games/sec (1-2 hours for 100k games)
-- **H200 target**: 100-200 games/sec (30-60 minutes for 100k games)
-- **Cost target**: $4-8 USD total (vs $144 Pluribus)
-- **Quality target**: Superhuman NLHE performance
+##### **5.2.2 Mixed Precision Training**
+- **Target files**: `poker_bot/parallel.py`, `poker_bot/gpu_config.py`
+- **Current**: FP32 computation throughout
+- **Optimization**:
+  ```python
+  # Enable FP16 for strategy computations
+  jax.config.update('jax_enable_x64', False)
+  strategy = jax.lax.convert_element_type(strategy, jnp.float16)
+  ```
+- **Implementation**: FP16 for strategies, FP32 for critical calculations
+- **Expected speedup**: 2-3x (50% memory, 2x Tensor Core usage)
+
+##### **5.2.3 Vectorized CFR Updates**
+- **Target file**: `poker_bot/parallel.py` → `distributed_training_step()`
+- **Current**: Individual regret updates per info_set
+- **Optimization**:
+  ```python
+  # Replace: for info_set in info_sets
+  # With: regrets = jax.vmap(update_regret)(all_info_sets)
+  ```
+- **Implementation**: Batch process all info_sets simultaneously
+- **Expected speedup**: 5-15x (parallel regret computation)
+
+##### **5.2.4 Memory Layout Optimization**
+- **Target files**: `poker_bot/engine.py`, `poker_bot/parallel.py`
+- **Current**: Python dictionaries and lists
+- **Optimization**:
+  ```python
+  # Replace: info_sets = {} (dict)
+  # With: info_sets = jnp.array(...) (contiguous memory)
+  ```
+- **Implementation**: JAX arrays for all game state, leverage HBM3 bandwidth
+- **Expected speedup**: 2-5x (memory bandwidth optimization)
+
+##### **5.2.5 JIT Compilation Optimization**
+- **Target files**: All `poker_bot/*.py` files
+- **Current**: Partial JIT usage
+- **Optimization**:
+  ```python
+  @jax.jit
+  def complete_training_step(game_state, strategies):
+      return optimized_cfr_step(game_state, strategies)
+  ```
+- **Implementation**: Aggressive JIT for all hot paths
+- **Expected speedup**: 2-5x (compile overhead elimination)
+
+#### **5.3 COMPLEX OPTIMIZATIONS (1-2 days) - 100-500x Speedup**
+
+##### **5.3.1 GPU-Native CFR Algorithm**
+- **Target file**: New `poker_bot/gpu_cfr.py`
+- **Current**: CPU-style CFR ported to JAX
+- **Optimization**: Complete rewrite for GPU architecture
+  ```python
+  def gpu_native_cfr(game_trees, strategies):
+      # Massively parallel tree traversal
+      tree_nodes = jax.vmap(jax.vmap(explore_node))(game_trees)
+      # Tensor Core regret updates
+      regrets = jax.lax.conv_general_dilated(strategies, updates)
+      return regrets
+  ```
+- **Implementation**: Parallel tree exploration, Tensor Core math
+- **Expected speedup**: 50-200x (architecture-specific design)
+
+##### **5.3.2 Sparse Matrix Operations (cuSPARSE)**
+- **Target file**: New `poker_bot/sparse_ops.py`
+- **Current**: Dense matrices for info_sets
+- **Optimization**: Sparse representation for large strategy spaces
+  ```python
+  # Use JAX-compatible sparse operations
+  from jax.experimental import sparse
+  sparse_strategies = sparse.BCOO.fromdense(strategies)
+  ```
+- **Implementation**: Leverage cuSPARSE for info_set operations
+- **Expected speedup**: 10-50x (memory + compute efficiency)
+
+##### **5.3.3 Tensor Core Utilization (FP8)**
+- **Target files**: `poker_bot/gpu_config.py`, `poker_bot/parallel.py`
+- **Current**: FP32 computation, no Tensor Cores
+- **Optimization**: FP8 + Tensor Core for massive parallelism
+  ```python
+  # H100 specific: FP8 Tensor Core operations
+  @jax.jit
+  def tensor_core_cfr(strategies):
+      return jax.lax.dot_general(strategies, regrets, precision=jax.lax.Precision.HIGHEST)
+  ```
+- **Implementation**: 4,000 TFLOPS utilization on H100
+- **Expected speedup**: 10-30x (raw compute power)
+
+##### **5.3.4 Multi-GPU Scaling**
+- **Target file**: New `poker_bot/multi_gpu.py`
+- **Current**: Single GPU training
+- **Optimization**: Distributed training across multiple GPUs
+  ```python
+  # Multi-GPU with JAX sharding
+  mesh = jax.sharding.Mesh(devices, ('batch', 'model'))
+  sharded_cfr = jax.jit(cfr_step, in_shardings=mesh_sharding, out_shardings=mesh_sharding)
+  ```
+- **Implementation**: NVLink scaling, data parallelism
+- **Expected speedup**: 2-8x (linear scaling per GPU)
+
+##### **5.3.5 Custom Memory Management**
+- **Target file**: New `poker_bot/memory_manager.py`
+- **Current**: JAX default memory management
+- **Optimization**: Custom memory pools for HBM3
+  ```python
+  # Pre-allocate memory pools
+  memory_pool = jax.device_put(jnp.zeros(optimal_size), device)
+  # Recycle without allocation overhead
+  ```
+- **Implementation**: 3TB/s bandwidth utilization, zero-copy operations
+- **Expected speedup**: 2-10x (memory bandwidth optimization)
+
+#### **5.4 IMPLEMENTATION ROADMAP**
+
+##### **Phase 5A: Medium Optimizations (2-4 hours)**
+1. **Hour 1**: Vectorized game simulation (`cli.py`)
+2. **Hour 2**: Mixed precision training (`parallel.py`, `gpu_config.py`)  
+3. **Hour 3**: Vectorized CFR updates (`parallel.py`)
+4. **Hour 4**: Memory layout + JIT optimization (all files)
+- **Expected result**: 40-200 games/sec (20-100x speedup)
+
+##### **Phase 5B: Complex Optimizations (1-2 days)**
+1. **Day 1**: GPU-native CFR + sparse operations
+2. **Day 2**: Tensor Core utilization + multi-GPU scaling
+- **Expected result**: 200-1000 games/sec (100-500x speedup)
+
+##### **Phase 5C: Performance Targets**
+- **RTX 3090 + Medium**: 40-200 games/sec
+- **H100 + Medium**: 400-2000 games/sec  
+- **H100 + Complex**: 1000-5000 games/sec
+- **Cost for 100k games**: $0.50-2.00 USD (vs $144 Pluribus)
 
 ---
 
