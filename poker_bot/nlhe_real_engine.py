@@ -233,33 +233,36 @@ def vectorized_hand_strength(hand: jnp.ndarray) -> jnp.ndarray:
     trips_counts = jnp.sum(rank_counts >= 3)
     quads_counts = jnp.sum(rank_counts >= 4)
     
-    # Assign strength values
-    strength = 0.0
-    
+    # VECTORIZED STRENGTH ASSIGNMENT (no if statements)
     # Straight flush
-    if has_flush and has_straight:
-        strength = 8.0
+    straight_flush = (has_flush & has_straight).astype(float) * 8.0
+    
     # Four of a kind
-    elif quads_counts > 0:
-        strength = 7.0
+    four_kind = (quads_counts > 0).astype(float) * 7.0
+    
     # Full house
-    elif trips_counts > 0 and pair_counts > 1:
-        strength = 6.0
+    full_house = ((trips_counts > 0) & (pair_counts > 1)).astype(float) * 6.0
+    
     # Flush
-    elif has_flush:
-        strength = 5.0
+    flush = has_flush.astype(float) * 5.0
+    
     # Straight
-    elif has_straight:
-        strength = 4.0
+    straight = has_straight.astype(float) * 4.0
+    
     # Three of a kind
-    elif trips_counts > 0:
-        strength = 3.0
+    three_kind = (trips_counts > 0).astype(float) * 3.0
+    
     # Two pair
-    elif pair_counts >= 2:
-        strength = 2.0
+    two_pair = (pair_counts >= 2).astype(float) * 2.0
+    
     # One pair
-    elif pair_counts >= 1:
-        strength = 1.0
+    one_pair = (pair_counts >= 1).astype(float) * 1.0
+    
+    # Combine all strengths (highest wins)
+    strength = jnp.maximum.reduce([
+        straight_flush, four_kind, full_house, flush, straight,
+        three_kind, two_pair, one_pair
+    ])
     
     # Add high card value for tie-breaking
     high_card = jnp.max(ranks) / 100.0
