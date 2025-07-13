@@ -259,10 +259,13 @@ def vectorized_hand_strength(hand: jnp.ndarray) -> jnp.ndarray:
     one_pair = (pair_counts >= 1).astype(float) * 1.0
     
     # Combine all strengths (highest wins)
-    strength = jnp.maximum.reduce([
-        straight_flush, four_kind, full_house, flush, straight,
-        three_kind, two_pair, one_pair
-    ])
+    strength = jnp.maximum(straight_flush, four_kind)
+    strength = jnp.maximum(strength, full_house)
+    strength = jnp.maximum(strength, flush)
+    strength = jnp.maximum(strength, straight)
+    strength = jnp.maximum(strength, three_kind)
+    strength = jnp.maximum(strength, two_pair)
+    strength = jnp.maximum(strength, one_pair)
     
     # Add high card value for tie-breaking
     high_card = jnp.max(ranks) / 100.0
