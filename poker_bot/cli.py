@@ -2058,10 +2058,18 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         
         # Warm-up compilation
         logger.info("🔥 Warming up JAX compilation...")
-        test_rng_keys = jr.split(rng_key, batch_size)
+        logger.info("   Using smaller batch size for faster compilation...")
+        
+        # Use smaller batch for warm-up
+        warmup_batch_size = min(1024, batch_size)
+        test_rng_keys = jr.split(rng_key, warmup_batch_size)
         test_game_config = {'players': 6, 'starting_stack': 100.0, 'small_blind': 1.0, 'big_blind': 2.0}
+        
+        logger.info(f"   Running warm-up with batch_size={warmup_batch_size}...")
         test_results = batch_simulate_real_holdem(test_rng_keys, test_game_config)
+        logger.info("   Warm-up simulation completed, running trainer step...")
         _ = trainer.train_step(rng_key, test_results)
+        logger.info("   ✅ Warm-up compilation completed!")
         
         # Training loop
         logger.info("🚀 REAL CFVFP Training Progress:")
