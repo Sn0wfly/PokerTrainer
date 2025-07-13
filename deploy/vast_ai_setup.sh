@@ -38,7 +38,7 @@ pip install --upgrade pip wheel setuptools
 
 # Install CUDA-specific JAX first (crucial for GPU training)
 echo "🔥 Installing JAX with CUDA support..."
-pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install --upgrade "jax[cuda12_local]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 
 # Verify JAX GPU installation
 echo "✅ Verifying JAX GPU installation..."
