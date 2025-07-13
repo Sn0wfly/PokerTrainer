@@ -39,7 +39,8 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     Returns:
         Dictionary containing game results and training data
     """
-    # Initialize game state
+    # Fixed constants for JAX compatibility
+    MAX_PLAYERS = 6  # Maximum players supported
     players = game_config['players']
     starting_stack = game_config['starting_stack']
     small_blind = game_config['small_blind']
@@ -56,14 +57,24 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     # 18: pot
     # 19: phase (0=preflop, 1=flop, 2=turn, 3=river, 4=showdown)
     
-    # Initialize player stacks and active flags
-    game_state = game_state.at[0:players].set(starting_stack)  # stacks
-    game_state = game_state.at[12:12+players].set(1)  # all active
+    # Initialize player stacks and active flags using masking
+    player_mask = jnp.arange(MAX_PLAYERS) < players
     
-    # Post blinds
-    game_state = game_state.at[6].set(small_blind)  # small blind bet
-    game_state = game_state.at[7].set(big_blind)   # big blind bet
-    game_state = game_state.at[18].set(small_blind + big_blind)  # pot
+    # Initialize stacks for active players
+    stacks = jnp.where(player_mask, starting_stack, 0.0)
+    game_state = game_state.at[0:MAX_PLAYERS].set(stacks)
+    
+    # Initialize active flags for active players
+    active_flags = jnp.where(player_mask, 1.0, 0.0)
+    game_state = game_state.at[12:12+MAX_PLAYERS].set(active_flags)
+    
+    # Post blinds (only if we have at least 2 players)
+    game_state = jax.lax.cond(
+        players >= 2,
+        lambda gs: gs.at[6].set(small_blind).at[7].set(big_blind).at[18].set(small_blind + big_blind),
+        lambda gs: gs,
+        game_state
+    )
     
     # Deal hole cards (simplified random assignment)
     rng_key, subkey = jax.random.split(rng_key)
@@ -81,7 +92,7 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     # Condition function for game loop
     def continue_game(state):
         # Continue while game is not terminal and under max decisions
-        active_players = jnp.sum(state['game_state'][12:12+players])
+        active_players = jnp.sum(state['game_state'][12:12+MAX_PLAYERS] * player_mask)
         phase = state['game_state'][19]
         return (active_players > 1) & (phase < 4) & (state['decisions'] < 50)
     
@@ -90,35 +101,39 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
         game_state = state['game_state']
         current_player = state['current_player'] % players
         
-        # Check if current player is active
-        is_active = game_state[12 + current_player]
+        # Check if current player is active and valid
+        is_active = game_state[12 + current_player] * player_mask[current_player]
         
         # Generate action probabilities (uniform random for now)
         rng_key, subkey = jax.random.split(state['rng_key'])
         action = jax.random.choice(subkey, 4)  # 0=fold, 1=call, 2=raise, 3=all-in
         
-        # Apply action
+        # Apply action only if player is active
+        # Fold action
         game_state = jax.lax.cond(
-            action == 0,  # fold
+            (action == 0) & (is_active > 0),
             lambda gs: gs.at[12 + current_player].set(0),
             lambda gs: gs,
             game_state
         )
         
         # Call action
-        call_amount = jnp.max(game_state[6:6+players]) - game_state[6 + current_player]
+        current_bet = game_state[6 + current_player]
+        max_bet = jnp.max(game_state[6:6+MAX_PLAYERS])
+        call_amount = jnp.maximum(0, max_bet - current_bet)
+        
         game_state = jax.lax.cond(
-            action == 1,  # call
+            (action == 1) & (is_active > 0),
             lambda gs: gs.at[6 + current_player].add(call_amount).at[18].add(call_amount),
             lambda gs: gs,
             game_state
         )
         
         # Raise action
-        raise_amount = jnp.max(game_state[6:6+players]) * 2
+        raise_amount = jnp.maximum(max_bet * 2, big_blind * 2)
         game_state = jax.lax.cond(
-            action == 2,  # raise
-            lambda gs: gs.at[6 + current_player].set(raise_amount).at[18].add(raise_amount),
+            (action == 2) & (is_active > 0),
+            lambda gs: gs.at[6 + current_player].set(raise_amount).at[18].add(raise_amount - current_bet),
             lambda gs: gs,
             game_state
         )
@@ -126,8 +141,8 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
         # All-in action
         all_in_amount = game_state[current_player]
         game_state = jax.lax.cond(
-            action == 3,  # all-in
-            lambda gs: gs.at[6 + current_player].set(all_in_amount).at[18].add(all_in_amount),
+            (action == 3) & (is_active > 0),
+            lambda gs: gs.at[6 + current_player].set(all_in_amount).at[18].add(all_in_amount - current_bet),
             lambda gs: gs,
             game_state
         )
@@ -148,20 +163,33 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
             'current_player': (current_player + 1) % players,
             'info_sets_count': state['info_sets_count'] + 1
         }
-    
+
     # Run the game loop
     final_state = jax.lax.while_loop(continue_game, game_step, loop_state)
     
-    # Determine winner
-    active_players_mask = final_state['game_state'][12:12+players]
-    winner = jnp.argmax(active_players_mask)
+    # Extract results
+    final_game_state = final_state['game_state']
+    active_players = jnp.sum(final_game_state[12:12+MAX_PLAYERS] * player_mask)
+    total_pot = final_game_state[18]
+    
+    # Simple winner determination (last active player wins)
+    winner_index = jnp.argmax(final_game_state[12:12+MAX_PLAYERS] * player_mask)
+    
+    # Calculate payoffs
+    payoffs = jnp.zeros(MAX_PLAYERS)
+    payoffs = payoffs.at[winner_index].set(total_pot)
+    
+    # Apply player mask to payoffs
+    payoffs = payoffs * player_mask
     
     return {
-        'game_state': final_state['game_state'],
-        'decisions': final_state['decisions'],
+        'payoffs': payoffs[:players],  # Only return payoffs for actual players
         'info_sets_count': final_state['info_sets_count'],
-        'winner': winner,
-        'pot': final_state['game_state'][18]
+        'decisions_made': final_state['decisions'],
+        'final_pot': total_pot,
+        'winner': winner_index,
+        'active_players': active_players,
+        'game_length': final_state['decisions']
     }
 
 @jax.jit
@@ -600,9 +628,9 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                 batch_results = batch_simulate_games(batch_rng_keys, jax_game_config)
                 
                 # Process batch results
-                batch_decisions = jnp.sum(batch_results['decisions'])
+                batch_decisions = jnp.sum(batch_results['decisions_made'])
                 batch_info_sets = jnp.sum(batch_results['info_sets_count'])
-                batch_pots = jnp.sum(batch_results['pot'])
+                batch_pots = jnp.sum(batch_results['final_pot'])
                 
                 # Update statistics
                 games_played += current_batch_size
@@ -751,8 +779,16 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
         logger.info("📊 PERFORMANCE COMPARISON:")
         logger.info(f"   Sequential training (before): ~2.0 games/sec")
         logger.info(f"   Vectorized training (now): {avg_games_per_sec:.1f} games/sec")
-        logger.info(f"   Speedup achieved: {avg_games_per_sec/2.0:.1f}x")
-        logger.info(f"   Time for 100k games: {100000/avg_games_per_sec/60:.1f} minutes (vs {100000/2.0/60:.1f} minutes before)")
+        
+        if avg_games_per_sec > 0:
+            speedup = avg_games_per_sec / 2.0
+            time_for_100k = 100000 / avg_games_per_sec / 60
+            logger.info(f"   Speedup achieved: {speedup:.1f}x")
+            logger.info(f"   Time for 100k games: {time_for_100k:.1f} minutes (vs {100000/2.0/60:.1f} minutes before)")
+        else:
+            logger.info("   Speedup achieved: N/A (training failed)")
+            logger.info("   Time for 100k games: N/A (training failed)")
+        
         logger.info("=" * 60)
         
     except Exception as e:
