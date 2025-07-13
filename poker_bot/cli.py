@@ -183,7 +183,11 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
         )
         
         # Betting round loop
-        current_player = (bb_pos + 1) % players if phase == 0 else (button_pos + 1) % players
+        current_player = jax.lax.cond(
+            phase == 0,
+            lambda: (bb_pos + 1) % players,
+            lambda: (button_pos + 1) % players
+        )
         actions_this_round = 0
         max_actions = players * 4  # Prevent infinite loops
         
