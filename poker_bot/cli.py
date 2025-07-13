@@ -422,9 +422,10 @@ def test_phase2(iterations: int, algorithm: str):
         # Test algorithm
         test_info_state = InfoState(
             player_id=0,
-            betting_round=0,
-            pot_size=10.0,
-            num_players=2
+            cards=jnp.array([1, 2, 3, 4, 5]),
+            history=jnp.array([0, 1, 0, 1]),
+            pot=10.0,
+            round=0
         )
         test_regret = jr.normal(jr.PRNGKey(42), (4,))
         test_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])
