@@ -451,9 +451,12 @@ def batch_simulate_real_holdem(rng_keys: jnp.ndarray, game_config: Dict[str, Any
         'hand_evaluations': batch_results['hand_evaluations'],
         'hole_cards': batch_results['hole_cards'],
         'final_community': batch_results['final_community'],
-        'winners': batch_results['winners'],
-        'betting_rounds': batch_results['betting_rounds'],
-        'showdown_occurred': batch_results['showdown_occurred']
+        'winner': batch_results['winner'],  # Fixed: was 'winners' 
+        'payoffs': batch_results['payoffs'],
+        'active_players': batch_results['active_players'],
+        'game_length': batch_results['game_length'],
+        'betting_rounds': batch_results['decisions_made'],  # Use decisions_made as proxy for betting_rounds
+        'showdown_occurred': batch_results['active_players'] > 1  # If more than 1 active player, showdown occurred
     }
     
     return aggregated_results
@@ -1048,7 +1051,7 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                     logger.info("🎯 Early performance analysis:")
                     logger.info(f"   Current speed: {games_per_sec:.1f} games/sec")
                     logger.info(f"   Estimated total time: {estimated_total_time/60:.1f} minutes")
-                    logger.info(f"   Expected speedup over sequential: {games_per_sec/2.0:.1f}x")
+                    logger.info(f"   Expected speedup over sequential: {avg_games_per_sec/2.0:.1f}x" if avg_games_per_sec > 0 else "   Expected speedup over sequential: N/A (no games completed)")
                     logger.info("=" * 60)
                 
             except Exception as e:
@@ -1082,7 +1085,7 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
         logger.info(f"   GPU optimizations: ✅ Device placement, ✅ Vectorized ops, ✅ Batch processing")
         logger.info(f"   Expected GPU utilization: 50-90% (vs 2% before)")
         logger.info(f"   Batch size optimization: {batch_size} games/batch (5x increase)")
-        logger.info(f"   Expected speedup over sequential: {avg_games_per_sec/2.0:.1f}x")
+        logger.info(f"   Expected speedup over sequential: {avg_games_per_sec/2.0:.1f}x" if avg_games_per_sec > 0 else "   Expected speedup over sequential: N/A (no games completed)")
         logger.info(f"   🎯 REAL POKER: Hand evaluations, betting rounds, showdowns!")
         logger.info("")
         logger.info(f"💾 Model Configuration:")
@@ -1096,8 +1099,8 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
         logger.info(f"📊 GPU PERFORMANCE COMPARISON:")
         logger.info(f"   Previous version: 34.2 games/sec, 2% GPU usage")
         logger.info(f"   GPU-optimized version: {avg_games_per_sec:.1f} games/sec, Expected 50-90% GPU usage")
-        logger.info(f"   Performance improvement: {avg_games_per_sec/34.2:.1f}x faster")
-        logger.info(f"   Time for 100k games: {100000/avg_games_per_sec/60:.1f} minutes")
+        logger.info(f"   Performance improvement: {avg_games_per_sec/34.2:.1f}x faster" if avg_games_per_sec > 0 else "   Performance improvement: N/A (no games completed)")
+        logger.info(f"   Time for 100k games: {100000/avg_games_per_sec/60:.1f} minutes" if avg_games_per_sec > 0 else "   Time for 100k games: N/A (no games completed)")
         logger.info(f"   🚀 GPU optimizations: Device placement, vectorized operations, batch processing")
         logger.info("=" * 60)
         
@@ -1156,8 +1159,8 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
         logger.info(f"   GPU-optimized training (current): {avg_games_per_sec:.1f} games/sec")
         logger.info(f"   GPU utilization improvement: 2% → Expected 50-90%")
         logger.info(f"   Batch size optimization: 100 → {batch_size} games/batch")
-        logger.info(f"   Overall speedup from original: {avg_games_per_sec/2.0:.1f}x")
-        logger.info(f"   Time for 100k games: {100000/avg_games_per_sec/60:.1f} minutes")
+        logger.info(f"   Overall speedup from original: {avg_games_per_sec/2.0:.1f}x" if avg_games_per_sec > 0 else "   Overall speedup from original: N/A (no games completed)")
+        logger.info(f"   Time for 100k games: {100000/avg_games_per_sec/60:.1f} minutes" if avg_games_per_sec > 0 else "   Time for 100k games: N/A (no games completed)")
         logger.info(f"   🚀 Key GPU optimizations applied:")
         logger.info(f"      • jax.device_put() for forced GPU placement")
         logger.info(f"      • jax.default_device() for GPU execution context")
