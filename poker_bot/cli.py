@@ -171,8 +171,8 @@ def evaluate(model: Optional[str]):
     # Test hand evaluator
     try:
         evaluator = HandEvaluator()
-        test_cards = ['2s', '2h', '2d', '2c', '3s', '3h', '3d']
-        result = evaluator.evaluate_hand(test_cards)
+        test_cards = [0, 1, 2, 3, 4, 5, 6]  # Card indices instead of strings
+        result = evaluator.evaluate_single(test_cards)
         logger.info(f"✅ Hand evaluator working: {result}")
     except Exception as e:
         logger.error(f"❌ Hand evaluator failed: {e}")
