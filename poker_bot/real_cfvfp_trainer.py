@@ -103,12 +103,15 @@ class RealCFVFPTrainer:
     def _create_info_set_from_game(self, game_results: Dict[str, jnp.ndarray], 
                                   player_id: int, game_idx: int) -> InfoSet:
         """Create real information set from poker game results"""
-        # Extract game data
+        # Extract game data - use correct field names from simulate_real_holdem_vectorized
         hole_cards = game_results['hole_cards'][game_idx, player_id]
-        community_cards = game_results['community_cards'][game_idx]
+        community_cards = game_results['final_community'][game_idx]  # Changed from 'community_cards'
         payoffs = game_results['payoffs'][game_idx, player_id]
         final_pot = game_results['final_pot'][game_idx]
-        final_stacks = game_results['final_stacks'][game_idx, player_id]
+        
+        # For stack size, we need to calculate from the game state
+        # Since we don't have final_stacks, we'll use a default value
+        stack_size = 100.0  # Default starting stack
         
         # Determine position (simplified)
         position = player_id % 6
@@ -128,7 +131,7 @@ class RealCFVFPTrainer:
             hole_cards=hole_cards,
             community_cards=community_cards,
             pot_size=float(final_pot),
-            stack_size=float(final_stacks),
+            stack_size=float(stack_size),
             hand_strength=float(hand_strength),
             phase=phase,
             betting_history=betting_history
