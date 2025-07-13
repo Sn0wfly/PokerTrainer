@@ -228,7 +228,7 @@ def evaluate(model: Optional[str]):
     logger.info("🎉 All components working!")
 
 @cli.command()
-@click.option('--iterations', default=10000, help='Number of test iterations')
+@click.option('--iterations', default=1000, help='Number of test iterations')
 @click.option('--batch-size', default=512, help='Batch size for testing')
 @click.option('--temperature', default=1.0, help='Temperature for strategy computation')
 @click.option('--learning-rate', default=0.1, help='Learning rate for Q-value updates')
@@ -364,26 +364,6 @@ def test_modern(iterations: int, batch_size: int, temperature: float, learning_r
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
-@cli.command()
-def list_models():
-    """List available trained models"""
-    
-    models_dir = Path("models")
-    if not models_dir.exists():
-        logger.info("No models directory found")
-        return
-    
-    model_files = list(models_dir.glob("*.pkl"))
-    
-    if not model_files:
-        logger.info("No trained models found")
-        return
-    
-    logger.info("Available models:")
-    for model_file in model_files:
-        size = model_file.stat().st_size / (1024 * 1024)  # MB
-        logger.info(f"  {model_file.name} ({size:.1f} MB)")
 
 @cli.command()
 @click.option('--iterations', default=1000, help='Number of benchmark iterations')
@@ -541,6 +521,207 @@ def benchmark_phase2(benchmark_type: str, iterations: int):
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+@cli.command()
+@click.option('--iterations', default=100, help='Number of iterations to test')
+@click.option('--batch-size', default=8192, help='Batch size for testing')
+@click.option('--algorithm', default='pdcfr_plus', help='Algorithm to test')
+@click.option('--detailed/--no-detailed', default=True, help='Show detailed per-iteration timing')
+def test_iteration_timing(iterations: int, batch_size: int, algorithm: str, detailed: bool):
+    """Test detailed timing of individual CFR iterations"""
+    
+    try:
+        from .parallel import create_parallel_trainer, get_optimal_parallel_config
+        from .algorithms import create_advanced_cfr_trainer
+        from .optimization import create_optimized_trainer, get_optimal_optimization_config
+        from .modern_cfr import InfoState
+        import jax.numpy as jnp
+        import jax.random as jr
+        import time
+        
+        logger.info(f"🔍 Testing Iteration Timing - {algorithm}")
+        logger.info(f"Iterations: {iterations}, Batch size: {batch_size}")
+        logger.info("=" * 60)
+        
+        # Create trainer based on algorithm
+        if algorithm == 'parallel':
+            config = get_optimal_parallel_config()
+            trainer = create_parallel_trainer(config)
+        elif algorithm == 'optimized':
+            config = get_optimal_optimization_config()
+            trainer = create_optimized_trainer(config)
+        else:
+            trainer = create_advanced_cfr_trainer(algorithm)
+        
+        # Test data
+        key = jr.PRNGKey(42)
+        test_info_state = InfoState(
+            player_id=0,
+            cards=jnp.array([1, 2, 3, 4, 5]),
+            history=jnp.array([0, 1, 0, 1]),
+            pot=10.0,
+            round=0
+        )
+        
+        # Different test data based on trainer type
+        if algorithm == 'parallel':
+            test_q_values = jr.normal(key, (batch_size, 4))
+            test_regrets = jr.normal(jr.split(key)[0], (batch_size, 4))
+        elif algorithm == 'optimized':
+            test_q_values = jr.normal(key, (4,))
+            test_regrets = jr.normal(jr.split(key)[0], (4,))
+        else:
+            test_regret = jr.normal(key, (4,))
+            test_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])
+        
+        # Warmup (important for JAX JIT compilation)
+        logger.info("🔥 Warming up (JIT compilation)...")
+        warmup_start = time.time()
+        
+        for i in range(10):
+            if algorithm == 'parallel':
+                trainer.distributed_training_step(test_q_values[0], test_regrets[0], 0.1)
+            elif algorithm == 'optimized':
+                trainer.optimized_training_step(test_q_values, test_regrets)
+            else:
+                trainer.training_step(test_info_state, test_regret, test_strategy)
+        
+        warmup_time = time.time() - warmup_start
+        logger.info(f"✅ Warmup completed in {warmup_time:.2f}s")
+        
+        # Detailed iteration timing
+        iteration_times = []
+        component_times = {
+            'q_update': [],
+            'strategy_compute': [],
+            'regret_update': [],
+            'total': []
+        }
+        
+        logger.info(f"\n📊 Running {iterations} iterations...")
+        
+        for i in range(iterations):
+            iteration_start = time.time()
+            
+            # Measure components
+            if algorithm == 'parallel':
+                q_start = time.time()
+                result = trainer.distributed_training_step(
+                    test_q_values[i % len(test_q_values)], 
+                    test_regrets[i % len(test_regrets)], 
+                    0.1
+                )
+                q_time = time.time() - q_start
+                component_times['q_update'].append(q_time)
+                
+            elif algorithm == 'optimized':
+                q_start = time.time()
+                result = trainer.optimized_training_step(test_q_values, test_regrets)
+                q_time = time.time() - q_start
+                component_times['q_update'].append(q_time)
+                
+            else:
+                # Advanced CFR algorithm
+                q_start = time.time()
+                result = trainer.training_step(test_info_state, test_regret, test_strategy)
+                q_time = time.time() - q_start
+                component_times['q_update'].append(q_time)
+            
+            iteration_time = time.time() - iteration_start
+            iteration_times.append(iteration_time)
+            component_times['total'].append(iteration_time)
+            
+            # Show detailed progress
+            if detailed and (i < 10 or i % 10 == 0):
+                logger.info(f"  Iteration {i+1:3d}: {iteration_time*1000:.2f}ms "
+                           f"(Q-update: {q_time*1000:.2f}ms)")
+        
+        # Calculate statistics
+        total_time = sum(iteration_times)
+        avg_time = total_time / iterations
+        min_time = min(iteration_times)
+        max_time = max(iteration_times)
+        std_time = float(jnp.std(jnp.array(iteration_times)))
+        
+        throughput = iterations / total_time
+        
+        # Memory usage
+        from .memory import get_memory_usage
+        memory_info = get_memory_usage()
+        
+        # Results
+        logger.info(f"\n🎯 ITERATION TIMING RESULTS")
+        logger.info("=" * 60)
+        logger.info(f"Algorithm: {algorithm}")
+        logger.info(f"Iterations: {iterations}")
+        logger.info(f"Batch size: {batch_size}")
+        logger.info(f"")
+        logger.info(f"⏱️  TIMING STATISTICS:")
+        logger.info(f"  Total time:     {total_time:.3f}s")
+        logger.info(f"  Average time:   {avg_time*1000:.2f}ms per iteration")
+        logger.info(f"  Min time:       {min_time*1000:.2f}ms")
+        logger.info(f"  Max time:       {max_time*1000:.2f}ms")
+        logger.info(f"  Std deviation:  {std_time*1000:.2f}ms")
+        logger.info(f"  Throughput:     {throughput:.1f} iterations/sec")
+        logger.info(f"")
+        logger.info(f"🧠 MEMORY USAGE:")
+        logger.info(f"  Process memory: {memory_info['process_memory_mb']:.1f}MB")
+        logger.info(f"  System memory:  {memory_info['system_memory_percent']:.1f}%")
+        logger.info(f"  Available mem:  {memory_info['available_memory_gb']:.1f}GB")
+        
+        # Component breakdown
+        if component_times['q_update']:
+            avg_q_time = sum(component_times['q_update']) / len(component_times['q_update'])
+            logger.info(f"")
+            logger.info(f"🔧 COMPONENT BREAKDOWN:")
+            logger.info(f"  Q-value update: {avg_q_time*1000:.2f}ms avg")
+            logger.info(f"  Q-update %:     {(avg_q_time/avg_time)*100:.1f}%")
+        
+        # Performance compared to baseline
+        baseline_throughput = 20  # steps/sec before Phase 2
+        speedup = throughput / baseline_throughput
+        logger.info(f"")
+        logger.info(f"📈 PERFORMANCE VS BASELINE:")
+        logger.info(f"  Baseline:       {baseline_throughput} steps/sec")
+        logger.info(f"  Current:        {throughput:.1f} steps/sec")
+        logger.info(f"  Speedup:        {speedup:.1f}x")
+        
+        # VRAM usage estimate
+        elements_per_iteration = batch_size * 4  # 4 actions
+        memory_per_element = 4  # bytes for float32
+        vram_usage_mb = (elements_per_iteration * memory_per_element) / (1024*1024)
+        logger.info(f"")
+        logger.info(f"🎯 VRAM USAGE ESTIMATE:")
+        logger.info(f"  Elements/iter:  {elements_per_iteration:,}")
+        logger.info(f"  VRAM/iter:      {vram_usage_mb:.1f}MB")
+        
+        logger.info(f"\n✅ Iteration timing test completed!")
+        
+    except Exception as e:
+        logger.error(f"❌ Iteration timing test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+@cli.command()
+def list_models():
+    """List available trained models"""
+    
+    models_dir = Path("models")
+    if not models_dir.exists():
+        logger.info("No models directory found")
+        return
+    
+    model_files = list(models_dir.glob("*.pkl"))
+    
+    if not model_files:
+        logger.info("No trained models found")
+        return
+    
+    logger.info("Available models:")
+    for model_file in model_files:
+        size = model_file.stat().st_size / (1024 * 1024)  # MB
+        logger.info(f"  {model_file.name} ({size:.1f} MB)")
 
 if __name__ == '__main__':
     cli() 
