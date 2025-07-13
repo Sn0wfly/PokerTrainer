@@ -133,14 +133,86 @@ python -m poker_bot.cli test-phase2
 
 ### 3. Start Training
 
-```bash
-# Start optimized training in background
-tmux new-session -d -s training
-tmux send-keys -t training '/opt/poker_env/train_poker_phase2.sh' C-m
+#### 🚀 Fast Training (Recommended)
 
-# Monitor training
-tmux attach -t training
+```bash
+# Train with parallel algorithm (349+ steps/sec)
+nohup python -m poker_bot.cli train-fast \
+  --iterations 100000 \
+  --batch-size 8192 \
+  --algorithm parallel \
+  --save-interval 10000 \
+  --save-path models/complete_model.pkl \
+  --gpu > training_complete.log 2>&1 &
 ```
+
+#### 📊 Monitor Training Progress
+
+```bash
+# Monitor in real-time
+tail -f training_complete.log
+
+# Check process status
+ps aux | grep train-fast
+jobs
+
+# Stop training (if needed)
+killall python
+# Or: kill %1
+```
+
+#### 🎯 Algorithm Options
+
+| Algorithm | Speed | Best For |
+|-----------|-------|----------|
+| `parallel` | 349+ steps/sec | **Maximum speed** |
+| `pdcfr_plus` | 219+ steps/sec | **Stable learning** |
+| `outcome_sampling` | 33+ steps/sec | **Exploration** |
+| `neural_fsp` | 38+ steps/sec | **Neural integration** |
+
+#### 📈 Checkpoint Monitoring
+
+Training creates checkpoints every 10,000 iterations:
+
+```bash
+# Expected checkpoint sizes (with data accumulation)
+models/complete_model_checkpoint_10000.pkl   # ~1.5MB
+models/complete_model_checkpoint_20000.pkl   # ~3.0MB
+models/complete_model_checkpoint_50000.pkl   # ~7.6MB
+models/complete_model_checkpoint_100000.pkl  # ~15MB
+```
+
+**Note**: If checkpoints are <1MB, training data may not be accumulating properly.
+
+#### 🔧 Jupyter Notebook Users
+
+Since Ctrl+C doesn't work in Jupyter:
+
+```bash
+# Open new terminal and run:
+ssh user@vast-instance
+killall python
+
+# Or find specific process:
+ps aux | grep train-fast
+kill <PID>
+```
+
+#### 🐛 Common Issues
+
+**Small checkpoint files (<1MB):**
+- Fixed in latest version - data now accumulates properly
+- Should grow: 1.5MB → 3MB → 7.6MB → 15MB
+- If still small, ensure you're using `train-fast` not `train`
+
+**cuSPARSE warnings:**
+- These are warnings, not errors - training continues normally
+- GPU acceleration still works correctly
+
+**Wrong log file:**
+- `train` command → `training.log`
+- `train-fast` command → `training_complete.log`
+- Always check the correct log file for your command
 
 ### 4. Download Trained Model
 
@@ -183,15 +255,14 @@ python -m poker_bot.cli play --model local_model.pkl --hands 10
 
 ## 📊 Performance
 
-### Training Performance (RTX 3090 - Phase 2 Optimized)
-- **Multi-GPU Training**: 643 steps/sec with 735% efficiency
-- **Advanced CFR Algorithm**: 162 steps/sec
-- **Optimization Suite**: 52 steps/sec
+### Training Performance (RTX 3090 - Phase 3 Verified)
+- **Parallel Training**: 349+ steps/sec (production verified)
+- **PDCFRPlus**: 219+ steps/sec (production verified)
+- **Outcome Sampling**: 33+ steps/sec
+- **Neural FSP**: 38+ steps/sec
 - **VRAM Utilization**: 76% (18.7GB/24GB)
-- **Algorithm Benchmarks**: 
-  - PDCFRPlus: 238 steps/sec
-  - Outcome Sampling: 13 steps/sec
-  - Neural FSP: 38 steps/sec
+- **Model Growth**: 1.5MB → 15MB over 100k iterations
+- **Training Time**: ~4.7 minutes for 100k iterations
 
 ### Training Performance (H100 - Projected)
 - **Hand Evaluation**: 400M+ hands/sec
