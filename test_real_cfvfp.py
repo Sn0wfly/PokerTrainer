@@ -22,7 +22,7 @@ def test_real_cfvfp():
     
     try:
         from poker_bot.real_cfvfp_trainer import RealCFVFPTrainer, RealCFVFPConfig
-        from poker_bot.nlhe_real_engine import batch_simulate_real_holdem
+        from poker_bot.cli import batch_simulate_real_holdem
         
         print("✅ Modules imported successfully")
         
@@ -130,7 +130,7 @@ def test_model_growth():
     
     try:
         from poker_bot.real_cfvfp_trainer import RealCFVFPTrainer, RealCFVFPConfig
-        from poker_bot.nlhe_real_engine import batch_simulate_real_holdem
+        from poker_bot.cli import batch_simulate_real_holdem
         
         config = RealCFVFPConfig(batch_size=512)
         trainer = RealCFVFPTrainer(config)

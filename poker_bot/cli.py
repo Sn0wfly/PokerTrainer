@@ -2024,7 +2024,6 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
     # Import REAL CFVFP modules
     try:
         from .real_cfvfp_trainer import RealCFVFPTrainer, RealCFVFPConfig
-        from .nlhe_real_engine import batch_simulate_real_holdem
         import jax.random as jr
         import time
         import pickle
