@@ -317,6 +317,72 @@ def create_memory_efficient_trainer(config: Dict[str, Any]) -> Callable:
     
     return trainer
 
+class AdaptiveBatchManager:
+    """Adaptive batch size manager for memory-constrained training"""
+    
+    def __init__(self, base_batch_size: int = 512, 
+                 memory_threshold: float = 0.8,
+                 min_batch_size: int = 64,
+                 max_batch_size: int = 4096):
+        self.base_batch_size = base_batch_size
+        self.memory_threshold = memory_threshold
+        self.min_batch_size = min_batch_size
+        self.max_batch_size = max_batch_size
+        self.current_batch_size = base_batch_size
+        self.memory_history = []
+        self.adjustment_factor = 0.8
+        
+        logger.info(f"AdaptiveBatchManager initialized with base_batch_size={base_batch_size}")
+    
+    def get_batch_size(self) -> int:
+        """Get current adaptive batch size"""
+        return self.current_batch_size
+    
+    def update_batch_size(self, memory_usage: Optional[Dict[str, float]] = None) -> int:
+        """Update batch size based on memory usage"""
+        if memory_usage is None:
+            memory_usage = get_memory_usage()
+        
+        memory_percent = memory_usage['percent'] / 100.0
+        self.memory_history.append(memory_percent)
+        
+        # Keep only recent memory history
+        if len(self.memory_history) > 10:
+            self.memory_history.pop(0)
+        
+        # Calculate average memory usage
+        avg_memory = sum(self.memory_history) / len(self.memory_history)
+        
+        # Adjust batch size based on memory pressure
+        if avg_memory > self.memory_threshold:
+            # Reduce batch size
+            new_batch_size = int(self.current_batch_size * self.adjustment_factor)
+            self.current_batch_size = max(new_batch_size, self.min_batch_size)
+            logger.info(f"Memory pressure detected ({avg_memory:.2f}), reducing batch size to {self.current_batch_size}")
+        elif avg_memory < self.memory_threshold * 0.6:
+            # Increase batch size if memory usage is low
+            new_batch_size = int(self.current_batch_size / self.adjustment_factor)
+            self.current_batch_size = min(new_batch_size, self.max_batch_size)
+            logger.info(f"Low memory usage ({avg_memory:.2f}), increasing batch size to {self.current_batch_size}")
+        
+        return self.current_batch_size
+    
+    def reset_batch_size(self):
+        """Reset batch size to base value"""
+        self.current_batch_size = self.base_batch_size
+        self.memory_history = []
+        logger.info(f"Batch size reset to {self.base_batch_size}")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get adaptive batch manager statistics"""
+        return {
+            'current_batch_size': self.current_batch_size,
+            'base_batch_size': self.base_batch_size,
+            'memory_threshold': self.memory_threshold,
+            'avg_memory_usage': sum(self.memory_history) / len(self.memory_history) if self.memory_history else 0,
+            'memory_history_length': len(self.memory_history)
+        }
+
 # Initialize memory management
 def init_memory_management():
     """Initialize memory management system"""
