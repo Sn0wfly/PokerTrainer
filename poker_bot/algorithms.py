@@ -83,7 +83,6 @@ class PDCFRPlus:
             'iteration': 0
         }
     
-    @jit
     def _adaptive_learning_rate(self, iteration: int, base_lr: float) -> float:
         """Compute adaptive learning rate"""
         if self.config.use_adaptive_learning_rate:
@@ -92,7 +91,6 @@ class PDCFRPlus:
             return base_lr * (decay_rate ** iteration)
         return base_lr
     
-    @jit
     def _predictor_step(self, regret_state: RegretState, 
                        current_regret: jnp.ndarray,
                        learning_rate: float) -> RegretState:
@@ -118,7 +116,6 @@ class PDCFRPlus:
             iteration=regret_state.iteration + 1
         )
     
-    @jit
     def _corrector_step(self, regret_state: RegretState,
                        current_regret: jnp.ndarray,
                        learning_rate: float) -> RegretState:
@@ -141,7 +138,6 @@ class PDCFRPlus:
             iteration=regret_state.iteration + 1
         )
     
-    @jit
     def _compute_strategy_from_regret(self, regret_state: RegretState) -> jnp.ndarray:
         """Compute strategy from regret using regret matching"""
         # Normalize positive regret to get strategy
@@ -156,7 +152,6 @@ class PDCFRPlus:
         
         return strategy
     
-    @jit
     def update_regret_and_strategy(self, regret_state: RegretState,
                                   strategy_state: StrategyState,
                                   current_regret: jnp.ndarray,
@@ -222,7 +217,6 @@ class OutcomeSamplingCFR:
         
         logger.info("OutcomeSamplingCFR initialized")
     
-    @jit
     def sample_outcomes(self, key: jr.PRNGKey, 
                        num_samples: int,
                        action_probabilities: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -236,7 +230,6 @@ class OutcomeSamplingCFR:
         
         return sampled_actions, sampling_probs
     
-    @jit
     def compute_outcome_sampling_utility(self, sampled_actions: jnp.ndarray,
                                        sampling_probs: jnp.ndarray,
                                        payoffs: jnp.ndarray) -> jnp.ndarray:
@@ -253,7 +246,6 @@ class OutcomeSamplingCFR:
         
         return variance_reduced_utility
     
-    @jit
     def outcome_sampling_update(self, info_state: InfoState,
                               current_strategy: jnp.ndarray,
                               num_samples: int = 100) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -320,7 +312,6 @@ class NeuralFictitiousSelfPlay:
         
         return params
     
-    @jit
     def neural_network_forward(self, params: Dict[str, jnp.ndarray], 
                              info_state: jnp.ndarray) -> jnp.ndarray:
         """Forward pass through neural network"""
@@ -332,7 +323,6 @@ class NeuralFictitiousSelfPlay:
         
         return output
     
-    @jit
     def neural_strategy_computation(self, info_state: jnp.ndarray,
                                   temperature: float = 1.0) -> jnp.ndarray:
         """Compute strategy using neural network"""
@@ -346,7 +336,6 @@ class NeuralFictitiousSelfPlay:
         
         return strategy
     
-    @jit
     def update_neural_network(self, info_state: jnp.ndarray,
                             target_strategy: jnp.ndarray,
                             learning_rate: float = 0.001) -> Dict[str, jnp.ndarray]:
