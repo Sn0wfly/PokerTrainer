@@ -192,10 +192,11 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
             lambda: (button_pos + 1) % players
         )
         actions_this_round = 0
-        max_actions = players * 4  # Prevent infinite loops
+        max_actions = players * 3  # Prevent infinite loops (fold/check/call, bet/raise, all-in)
+        betting_decisions = 0  # Track actual betting decisions
         
         def betting_action(betting_carry):
-            current_player, player_stacks, player_bets, player_folded, pot, current_bet, actions_this_round, rng_key = betting_carry
+            current_player, player_stacks, player_bets, player_folded, pot, current_bet, actions_this_round, rng_key, betting_decisions = betting_carry
             
             # Skip if player is folded or all-in
             can_act = (player_folded[current_player] == 0) & (player_stacks[current_player] > 0)
@@ -282,6 +283,9 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
             # Move to next player
             next_player = (current_player + 1) % players
             
+            # Count as betting decision if player could act
+            new_betting_decisions = betting_decisions + jnp.where(can_act, 1, 0)
+            
             return (
                 next_player,
                 new_stacks,
@@ -290,20 +294,24 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
                 new_pot,
                 new_current_bet,
                 actions_this_round + 1,
-                rng_key
+                rng_key,
+                new_betting_decisions
             )
         
         # Run betting round
         def continue_betting(betting_carry):
-            _, _, _, player_folded, _, _, actions_this_round, _ = betting_carry
-            active_players = jnp.sum(1 - player_folded) * (jnp.arange(MAX_PLAYERS) < players)
+            _, _, _, player_folded, _, _, actions_this_round, _, _ = betting_carry
+            # Calculate active players correctly
+            player_mask = jnp.arange(MAX_PLAYERS) < players
+            active_players = (1 - player_folded) * player_mask
             active_count = jnp.sum(active_players)
+            # Continue if more than 1 player active and haven't exceeded max actions
             return (active_count > 1) & (actions_this_round < max_actions)
         
-        betting_carry = (current_player, player_stacks, player_bets, player_folded, pot, current_bet, actions_this_round, rng_key)
+        betting_carry = (current_player, player_stacks, player_bets, player_folded, pot, current_bet, actions_this_round, rng_key, betting_decisions)
         final_betting_carry = jax.lax.while_loop(continue_betting, betting_action, betting_carry)
         
-        _, player_stacks, player_bets, player_folded, pot, current_bet, _, rng_key = final_betting_carry
+        _, player_stacks, player_bets, player_folded, pot, current_bet, _, rng_key, final_betting_decisions = final_betting_carry
         
         # Add bets to pot at end of round
         pot = pot + jnp.sum(player_bets)
@@ -317,14 +325,16 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
             pot,
             0.0,  # Reset current bet
             community_cards,
-            decisions_made + actions_this_round,
+            decisions_made + final_betting_decisions,
             rng_key
         )
     
     # Run all betting rounds
     def continue_game(carry):
         phase, _, _, player_folded, _, _, _, _, _ = carry
-        active_players = jnp.sum(1 - player_folded) * (jnp.arange(MAX_PLAYERS) < players)
+        # Calculate active players correctly
+        player_mask = jnp.arange(MAX_PLAYERS) < players
+        active_players = (1 - player_folded) * player_mask
         active_count = jnp.sum(active_players)
         return (phase < 4) & (active_count > 1)
     
