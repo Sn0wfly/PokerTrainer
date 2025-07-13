@@ -44,31 +44,31 @@ def nlhe_6player_batch(rng_keys: jnp.ndarray) -> Dict[str, jnp.ndarray]:
     pot = jnp.full(batch_size, 3.0)
     
     # VECTORIZED BETTING ROUNDS
-    # Preflop betting
+    # Preflop betting (round=0)
     preflop_results = betting_round_vectorized(
         rng_keys, stacks, pot, hole_cards, community_cards[:, :0], 
-        round_name="preflop", active_players=6
+        round_id=0, active_players=6
     )
     
-    # Flop betting (3 community cards)
+    # Flop betting (3 community cards, round=1)
     flop_results = betting_round_vectorized(
         rng_keys, preflop_results['stacks'], preflop_results['pot'],
         hole_cards, community_cards[:, :3], 
-        round_name="flop", active_players=preflop_results['active_players']
+        round_id=1, active_players=preflop_results['active_players']
     )
     
-    # Turn betting (4 community cards)
+    # Turn betting (4 community cards, round=2)
     turn_results = betting_round_vectorized(
         rng_keys, flop_results['stacks'], flop_results['pot'],
         hole_cards, community_cards[:, :4], 
-        round_name="turn", active_players=flop_results['active_players']
+        round_id=2, active_players=flop_results['active_players']
     )
     
-    # River betting (5 community cards)
+    # River betting (5 community cards, round=3)
     river_results = betting_round_vectorized(
         rng_keys, turn_results['stacks'], turn_results['pot'],
         hole_cards, community_cards, 
-        round_name="river", active_players=turn_results['active_players']
+        round_id=3, active_players=turn_results['active_players']
     )
     
     # VECTORIZED HAND EVALUATION
@@ -103,7 +103,7 @@ def nlhe_6player_batch(rng_keys: jnp.ndarray) -> Dict[str, jnp.ndarray]:
 @jax.jit
 def betting_round_vectorized(rng_keys: jnp.ndarray, stacks: jnp.ndarray, 
                            pot: jnp.ndarray, hole_cards: jnp.ndarray,
-                           community_cards: jnp.ndarray, round_name: str,
+                           community_cards: jnp.ndarray, round_id: int,
                            active_players: jnp.ndarray) -> Dict[str, jnp.ndarray]:
     """
     VECTORIZED: Complete betting round for all games simultaneously

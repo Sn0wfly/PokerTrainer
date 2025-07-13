@@ -16,7 +16,6 @@ XLA_FLAGS = (
     '--xla_gpu_enable_triton_gemm=true '
     '--xla_gpu_autotune_level=4 '
     '--xla_gpu_force_compilation_parallelism=0 '
-    '--xla_gpu_enable_cudnn_frontend=true '
 )
 
 def setup_gpu_optimization():

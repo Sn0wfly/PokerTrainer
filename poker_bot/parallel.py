@@ -15,7 +15,8 @@ Key Features:
 import jax
 import jax.numpy as jnp
 import jax.random as jr
-from jax import pmap, checkpoint, tree_map
+from jax import pmap, checkpoint
+from jax.tree_util import tree_map
 from typing import Dict, List, Tuple, Optional, Callable, Any
 import logging
 import functools
