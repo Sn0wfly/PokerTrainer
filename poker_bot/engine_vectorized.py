@@ -9,7 +9,7 @@ import jax.random as jr
 from typing import Dict, Any, Tuple
 
 @jax.jit
-def vectorized_poker_batch(rng_keys: jnp.ndarray, batch_size: int) -> Dict[str, jnp.ndarray]:
+def vectorized_poker_batch(rng_keys: jnp.ndarray) -> Dict[str, jnp.ndarray]:
     """
     FULLY VECTORIZED: Process entire batch with single JAX operations
     No Python loops, no individual function calls
@@ -24,6 +24,7 @@ def vectorized_poker_batch(rng_keys: jnp.ndarray, batch_size: int) -> Dict[str, 
     
     # VECTORIZED CARD DEALING
     # Deal hole cards: first 4 cards for 2 players
+    batch_size = rng_keys.shape[0]
     hole_cards = shuffled_decks[:, :4].reshape(batch_size, 2, 2)
     
     # Deal community cards: next 5 cards
@@ -45,7 +46,7 @@ def vectorized_poker_batch(rng_keys: jnp.ndarray, batch_size: int) -> Dict[str, 
     
     # VECTORIZED BETTING SIMULATION
     # Simulate betting decisions for all games simultaneously
-    betting_results = vectorized_betting_simulation(rng_keys, batch_size)
+    betting_results = vectorized_betting_simulation(rng_keys)
     
     # VECTORIZED PAYOFFS
     # Calculate payoffs for all games simultaneously
@@ -138,13 +139,14 @@ def vectorized_hand_strength(hands: jnp.ndarray) -> jnp.ndarray:
     return strength
 
 @jax.jit
-def vectorized_betting_simulation(rng_keys: jnp.ndarray, batch_size: int) -> Dict[str, jnp.ndarray]:
+def vectorized_betting_simulation(rng_keys: jnp.ndarray) -> Dict[str, jnp.ndarray]:
     """
     VECTORIZED: Simulate betting for all games simultaneously
     No loops, single JAX operations
     """
     # VECTORIZED BETTING DECISIONS
     # Generate betting actions for all games simultaneously
+    batch_size = rng_keys.shape[0]
     betting_rng = jr.split(rng_keys[0], batch_size)
     
     # Action probabilities: [fold, call, raise]
@@ -222,12 +224,12 @@ def test_vectorized_performance():
     print("Testing vectorized poker engine...")
     
     # Warm-up
-    _ = vectorized_poker_batch(rng_keys, batch_size)
+    _ = vectorized_poker_batch(rng_keys)
     
     # Benchmark
     start = time.time()
     for _ in range(10):
-        results = vectorized_poker_batch(rng_keys, batch_size)
+        results = vectorized_poker_batch(rng_keys)
         results['payoffs'].block_until_ready()
     end = time.time()
     
