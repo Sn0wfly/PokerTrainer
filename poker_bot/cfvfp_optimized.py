@@ -120,10 +120,9 @@ class OptimizedCFVFPTrainer:
         
         return cf_payoffs
     
-    @partial(jit, static_argnums=(0,))
     def compute_reach_probabilities(self, 
-                                  game_results: Dict[str, jnp.ndarray],
-                                  player_id: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
+                                   game_results: Dict[str, jnp.ndarray],
+                                   player_id: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """
         Compute reach probabilities for CFVFP pruning
         """
@@ -131,7 +130,13 @@ class OptimizedCFVFPTrainer:
         
         # Extract game data
         active_players = game_results['active_players']  # (batch,)
-        betting_actions = game_results['betting_actions']  # (batch, 6)
+        
+        # Handle missing betting_actions gracefully
+        if 'betting_actions' in game_results:
+            betting_actions = game_results['betting_actions']  # (batch, 6)
+        else:
+            # Create dummy betting actions if not available
+            betting_actions = jnp.zeros((batch_size, 6), dtype=jnp.int32)
         
         # Player reach probability (simplified)
         reach_i = jnp.where(active_players > 0, 1.0, 0.0)  # (batch,)
