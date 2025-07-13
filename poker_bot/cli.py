@@ -2006,52 +2006,54 @@ def vectorized_cfr_training(rng_keys: jnp.ndarray, game_config: Dict[str, Any]) 
 @click.option('--temperature', default=1.0, help='Temperature for strategy computation')
 @click.option('--save-interval', default=1000, help='Save model every N iterations')
 @click.option('--log-interval', default=100, help='Log progress every N iterations')
-@click.option('--save-path', default='models/cfvfp_model.pkl', help='Path to save trained model')
+@click.option('--save-path', default='models/real_cfvfp_model.pkl', help='Path to save trained model')
 @click.option('--gpu/--no-gpu', default=True, help='Use GPU acceleration')
 def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperature: float,
                 save_interval: int, log_interval: int, save_path: str, gpu: bool):
     """
-    🚀 CFVFP Training: Counterfactual Value Based Fictitious Play
-    Target: 1000+ games/sec on RTX 3090
+    🚀 REAL CFVFP Training: Counterfactual Value Based Fictitious Play
+    Target: Real NLHE 6-player strategies with actual information sets
     
     Key Innovations:
-    - Q-values instead of regrets (2.9x speedup)
-    - Pure best-response strategy (argmax Q)
-    - Vectorized operations for GPU saturation
+    - REAL information sets from poker game states
+    - Q-values for each unique game situation
+    - Proper NLHE 6-player rules and betting
+    - Saves actual learned strategies, not fixed matrices
     """
     
-    # Import CFVFP modules
+    # Import REAL CFVFP modules
     try:
-        from .cfvfp_optimized import OptimizedCFVFPTrainer, CFVFPConfig
-        from .nlhe_real_engine import nlhe_6player_batch
+        from .real_cfvfp_trainer import RealCFVFPTrainer, RealCFVFPConfig
+        from .nlhe_real_engine import batch_simulate_real_holdem
         import jax.random as jr
         import time
         import pickle
         import os
         
-        logger.info("🚀 Starting CFVFP Training")
+        logger.info("🚀 Starting REAL CFVFP Training")
         logger.info("=" * 60)
-        logger.info(f"Algorithm: CFVFP (NeurIPS 2024)")
+        logger.info(f"Algorithm: REAL CFVFP (NeurIPS 2024)")
+        logger.info(f"Target: Real NLHE 6-player strategies")
         logger.info(f"Iterations: {iterations}")
         logger.info(f"Batch size: {batch_size}")
         logger.info(f"Learning rate: {learning_rate}")
         logger.info(f"Temperature: {temperature}")
-        logger.info(f"Target: 1000+ games/sec")
+        logger.info(f"Information sets: Dynamic (not fixed matrices)")
         logger.info("")
         
         # Create models directory
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
-        # Initialize CFVFP trainer
-        config = CFVFPConfig(
+        # Initialize REAL CFVFP trainer
+        config = RealCFVFPConfig(
             batch_size=batch_size,
             learning_rate=learning_rate,
             temperature=temperature
         )
-        trainer = OptimizedCFVFPTrainer(config)
+        trainer = RealCFVFPTrainer(config)
         
         # Training loop
-        logger.info("🚀 Starting CFVFP training loop...")
+        logger.info("🚀 Starting REAL CFVFP training loop...")
         start_time = time.time()
         rng_key = jr.PRNGKey(42)
         
@@ -2063,7 +2065,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         _ = trainer.train_step(rng_key, test_results)
         
         # Training loop
-        logger.info("🚀 CFVFP Training Progress:")
+        logger.info("🚀 REAL CFVFP Training Progress:")
         logger.info("=" * 60)
         
         for iteration in range(iterations):
@@ -2079,7 +2081,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
                 'big_blind': 2.0
             }
             
-            # 🚀 CFVFP Training Step
+            # 🚀 REAL CFVFP Training Step
             game_results = batch_simulate_real_holdem(rng_keys, game_config)
             results = trainer.train_step(rng_key, game_results)
             
@@ -2091,10 +2093,12 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
                 logger.info(f"🎯 Iteration {iteration + 1}/{iterations}")
                 logger.info(f"   Games/sec: {games_per_second:,.1f}")
                 logger.info(f"   Total games: {results['total_games']:,}")
+                logger.info(f"   Total info sets: {results['total_info_sets']:,}")
+                logger.info(f"   Info sets processed: {results['info_sets_processed']:,}")
+                logger.info(f"   Q-values count: {results['q_values_count']:,}")
+                logger.info(f"   Strategies count: {results['strategies_count']:,}")
                 logger.info(f"   Avg payoff: {results['avg_payoff']:.4f}")
                 logger.info(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
-                logger.info(f"   Q-value mean: {results['q_value_mean']:.4f}")
-                logger.info(f"   Strategy diversity: {results['strategy_diversity']:.4f}")
                 logger.info(f"   Elapsed time: {elapsed:.1f}s")
                 logger.info(f"   Target achieved: {'✅' if games_per_second > 1000 else '❌'}")
                 logger.info("")
@@ -2109,20 +2113,21 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         total_time = time.time() - start_time
         final_games_per_second = results['total_games'] / total_time
         
-        logger.info("🎉 CFVFP Training Completed!")
+        logger.info("🎉 REAL CFVFP Training Completed!")
         logger.info("=" * 60)
         logger.info(f"🚀 Final Performance:")
         logger.info(f"   Total iterations: {iterations}")
         logger.info(f"   Total games: {results['total_games']:,}")
+        logger.info(f"   Total info sets: {results['total_info_sets']:,}")
         logger.info(f"   Total time: {total_time:.1f}s")
         logger.info(f"   Average games/sec: {final_games_per_second:,.1f}")
         logger.info(f"   Target achieved: {'✅' if final_games_per_second > 1000 else '❌'}")
         logger.info("")
-        logger.info(f"🧠 CFVFP Algorithm Results:")
-        logger.info(f"   Q-value mean: {results['q_value_mean']:.4f}")
-        logger.info(f"   Q-value std: {results['q_value_std']:.4f}")
+        logger.info(f"🧠 REAL CFVFP Algorithm Results:")
+        logger.info(f"   Q-values learned: {results['q_values_count']:,}")
+        logger.info(f"   Strategies learned: {results['strategies_count']:,}")
         logger.info(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
-        logger.info(f"   Strategy diversity: {results['strategy_diversity']:.4f}")
+        logger.info(f"   Info sets processed: {results['info_sets_processed']:,}")
         logger.info("")
         logger.info(f"💾 Final model saved: {save_path}")
         
@@ -2130,11 +2135,11 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         trainer.save_model(save_path)
         
     except ImportError as e:
-        logger.error(f"❌ CFVFP module import failed: {e}")
-        logger.error("Make sure cfvfp_optimized.py is available")
+        logger.error(f"❌ REAL CFVFP module import failed: {e}")
+        logger.error("Make sure real_cfvfp_trainer.py is available")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"❌ CFVFP training failed: {e}")
+        logger.error(f"❌ REAL CFVFP training failed: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
