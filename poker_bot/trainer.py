@@ -58,7 +58,7 @@ class SimpleMCCFRTrainer:
         Create information set string for current game state
         """
         # Get player's hole cards
-        hole_cards = game_state.hole_cards[player_id]
+        hole_cards = self.engine.get_hole_cards(game_state, player_id)
         
         # Get community cards
         community = game_state.community_cards
