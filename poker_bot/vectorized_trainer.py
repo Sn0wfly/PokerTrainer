@@ -30,7 +30,6 @@ class VectorizedCFRTrainer:
         self.iterations = 0
         self.total_games = 0
         
-    @jax.jit
     def train_step(self, rng_key: jax.random.PRNGKey) -> Dict[str, jnp.ndarray]:
         """
         Single training step: Vectorized poker + CFR
