@@ -1,7 +1,7 @@
 # Core ML/AI Libraries
 jax[cuda]>=0.4.20
 jaxlib[cuda]>=0.4.20
-cfrx>=0.1.0
+cfrx>=0.0.2
 
 # Poker Hand Evaluation
 phevaluator>=0.5.3
