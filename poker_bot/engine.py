@@ -128,9 +128,9 @@ class PokerEngine:
         big_blind_pos = (button_pos + 2) % self.config.players
         
         # Deduct blinds from stacks and add to bets
-        players = players.at[small_blind_pos, 0].subtract(self.config.small_blind)
+        players = players.at[small_blind_pos, 0].add(-self.config.small_blind)
         players = players.at[small_blind_pos, 1].set(self.config.small_blind)
-        players = players.at[big_blind_pos, 0].subtract(self.config.big_blind)
+        players = players.at[big_blind_pos, 0].add(-self.config.big_blind)
         players = players.at[big_blind_pos, 1].set(self.config.big_blind)
         
         # Initialize deck and deal hole cards
@@ -230,14 +230,14 @@ class PokerEngine:
         elif action == Action.CALL:
             # Player calls
             call_amount = state.current_bet - state.players[player_id, 1]
-            new_players = new_players.at[player_id, 0].subtract(call_amount)
+            new_players = new_players.at[player_id, 0].add(-call_amount)
             new_players = new_players.at[player_id, 1].set(state.current_bet)
             new_pot += call_amount
             
         elif action == Action.BET:
             # Player bets (assume minimum bet)
             bet_amount = self.config.big_blind
-            new_players = new_players.at[player_id, 0].subtract(bet_amount)
+            new_players = new_players.at[player_id, 0].add(-bet_amount)
             new_players = new_players.at[player_id, 1].set(bet_amount)
             new_current_bet = bet_amount
             new_pot += bet_amount
@@ -247,7 +247,7 @@ class PokerEngine:
             raise_amount = state.current_bet * 2  # Simple 2x raise
             total_bet = raise_amount
             to_call = total_bet - state.players[player_id, 1]
-            new_players = new_players.at[player_id, 0].subtract(to_call)
+            new_players = new_players.at[player_id, 0].add(-to_call)
             new_players = new_players.at[player_id, 1].set(total_bet)
             new_current_bet = total_bet
             new_pot += to_call
