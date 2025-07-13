@@ -385,5 +385,161 @@ def list_models():
         size = model_file.stat().st_size / (1024 * 1024)  # MB
         logger.info(f"  {model_file.name} ({size:.1f} MB)")
 
+@cli.command()
+@click.option('--iterations', default=1000, help='Number of benchmark iterations')
+@click.option('--algorithm', default='pdcfr_plus', help='Algorithm to test (pdcfr_plus, outcome_sampling, neural_fsp)')
+def test_phase2(iterations: int, algorithm: str):
+    """Test Phase 2 performance optimizations"""
+    
+    try:
+        from .parallel import get_optimal_parallel_config, create_parallel_trainer
+        from .algorithms import create_advanced_cfr_trainer, benchmark_algorithms
+        from .optimization import get_optimal_optimization_config, create_optimized_trainer, benchmark_optimization
+        from .modern_cfr import InfoState
+        import jax.numpy as jnp
+        import jax.random as jr
+        import time
+        
+        logger.info("🚀 Testing Phase 2 - Performance Optimization")
+        logger.info("=" * 50)
+        
+        # Test 1: Parallel Training
+        logger.info("1. Testing Multi-GPU Parallel Training...")
+        parallel_config = get_optimal_parallel_config()
+        parallel_trainer = create_parallel_trainer(parallel_config)
+        
+        # Benchmark parallel performance
+        logger.info("   Benchmarking parallel performance...")
+        parallel_results = parallel_trainer.benchmark_parallel_performance(iterations=100)
+        
+        logger.info(f"   ✅ Parallel training: {parallel_results['throughput_steps_per_sec']:.1f} steps/sec")
+        logger.info(f"   ✅ Parallel efficiency: {parallel_results['parallel_efficiency']:.3f}")
+        
+        # Test 2: Advanced Algorithms
+        logger.info(f"\n2. Testing Advanced CFR Algorithm: {algorithm}")
+        advanced_trainer = create_advanced_cfr_trainer(algorithm)
+        
+        # Test algorithm
+        test_info_state = InfoState(
+            player_id=0,
+            betting_round=0,
+            pot_size=10.0,
+            num_players=2
+        )
+        test_regret = jr.normal(jr.PRNGKey(42), (4,))
+        test_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])
+        
+        start_time = time.time()
+        for i in range(min(iterations, 100)):
+            result = advanced_trainer.training_step(
+                test_info_state, test_regret, test_strategy
+            )
+        algorithm_time = time.time() - start_time
+        
+        logger.info(f"   ✅ {algorithm}: {(100 / algorithm_time):.1f} steps/sec")
+        
+        # Test 3: Optimization Suite
+        logger.info("\n3. Testing Optimization Suite...")
+        optimization_config = get_optimal_optimization_config()
+        optimized_trainer = create_optimized_trainer(optimization_config)
+        
+        # Test optimization
+        test_q_values = jr.normal(jr.PRNGKey(42), (4,))
+        test_regrets = jr.normal(jr.PRNGKey(43), (4,))
+        
+        start_time = time.time()
+        for i in range(min(iterations, 100)):
+            result = optimized_trainer.optimized_training_step(test_q_values, test_regrets)
+        optimization_time = time.time() - start_time
+        
+        logger.info(f"   ✅ Optimized trainer: {(100 / optimization_time):.1f} steps/sec")
+        
+        # Test 4: Algorithm Benchmark
+        logger.info("\n4. Running Algorithm Benchmark...")
+        benchmark_results = benchmark_algorithms(iterations=min(iterations, 100))
+        
+        logger.info("   Algorithm Performance:")
+        for algo, results in benchmark_results.items():
+            logger.info(f"   - {algo}: {results['throughput_steps_per_sec']:.1f} steps/sec")
+        
+        # Test 5: Optimization Benchmark
+        logger.info("\n5. Running Optimization Benchmark...")
+        opt_benchmark = benchmark_optimization(iterations=min(iterations, 100))
+        
+        logger.info(f"   ✅ Optimization benchmark: {opt_benchmark['throughput_steps_per_sec']:.1f} steps/sec")
+        logger.info(f"   ✅ Cache hit rate: {opt_benchmark['cache_hit_rate']:.3f}")
+        
+        # Summary
+        logger.info("\n🎉 Phase 2 Testing Complete!")
+        logger.info("=" * 50)
+        logger.info("✅ Multi-GPU parallel training: Working")
+        logger.info("✅ Advanced CFR algorithms: Working")
+        logger.info("✅ Optimization suite: Working")
+        logger.info("✅ Performance benchmarks: Working")
+        logger.info("\n🚀 Ready for Phase 3 - Texas Hold'em Implementation!")
+        
+    except Exception as e:
+        logger.error(f"❌ Phase 2 test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+@cli.command()
+@click.option('--benchmark-type', default='all', help='Type of benchmark (parallel, algorithms, optimization, all)')
+@click.option('--iterations', default=1000, help='Number of benchmark iterations')
+def benchmark_phase2(benchmark_type: str, iterations: int):
+    """Benchmark Phase 2 performance components"""
+    
+    try:
+        from .parallel import get_optimal_parallel_config, create_parallel_trainer
+        from .algorithms import benchmark_algorithms
+        from .optimization import benchmark_optimization
+        import time
+        
+        logger.info(f"🔥 Benchmarking Phase 2 Components: {benchmark_type}")
+        logger.info("=" * 50)
+        
+        results = {}
+        
+        if benchmark_type in ['parallel', 'all']:
+            logger.info("Benchmarking parallel training...")
+            parallel_config = get_optimal_parallel_config()
+            parallel_trainer = create_parallel_trainer(parallel_config)
+            results['parallel'] = parallel_trainer.benchmark_parallel_performance(iterations=iterations)
+            
+        if benchmark_type in ['algorithms', 'all']:
+            logger.info("Benchmarking algorithms...")
+            results['algorithms'] = benchmark_algorithms(iterations=iterations)
+            
+        if benchmark_type in ['optimization', 'all']:
+            logger.info("Benchmarking optimization...")
+            results['optimization'] = benchmark_optimization(iterations=iterations)
+        
+        # Display results
+        logger.info("\n📊 Benchmark Results:")
+        logger.info("=" * 50)
+        
+        for component, result in results.items():
+            logger.info(f"\n{component.upper()}:")
+            if component == 'parallel':
+                logger.info(f"  Throughput: {result['throughput_steps_per_sec']:.1f} steps/sec")
+                logger.info(f"  Efficiency: {result['parallel_efficiency']:.3f}")
+                logger.info(f"  Memory: {result['memory_peak_mb']:.1f} MB")
+            elif component == 'algorithms':
+                for algo, algo_result in result.items():
+                    logger.info(f"  {algo}: {algo_result['throughput_steps_per_sec']:.1f} steps/sec")
+            elif component == 'optimization':
+                logger.info(f"  Throughput: {result['throughput_steps_per_sec']:.1f} steps/sec")
+                logger.info(f"  Cache hit rate: {result['cache_hit_rate']:.3f}")
+                logger.info(f"  Final LR: {result['final_learning_rate']:.6f}")
+        
+        logger.info("\n🎯 Benchmark Complete!")
+        
+    except Exception as e:
+        logger.error(f"❌ Benchmark failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
 if __name__ == '__main__':
     cli() 
