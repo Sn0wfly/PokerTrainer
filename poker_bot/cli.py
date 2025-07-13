@@ -1864,7 +1864,7 @@ def gpu_intensive_hand_evaluation(all_cards: jnp.ndarray) -> jnp.ndarray:
             lambda: 7 + jnp.sum(suit_products) % 100,
             lambda: jax.lax.cond(
                 (max_rank_count == 3) & (unique_ranks == 2),
-                lambda: 6 + int(hand_complexity) % 100,
+                lambda: 6 + jnp.array(hand_complexity, dtype=jnp.int32) % 100,
                 lambda: jax.lax.cond(
                     is_flush,
                     lambda: 5 + jnp.sum(rank_matrix) % 100,
@@ -1873,14 +1873,14 @@ def gpu_intensive_hand_evaluation(all_cards: jnp.ndarray) -> jnp.ndarray:
                         lambda: 4 + jnp.sum(suit_matrix) % 100,
                         lambda: jax.lax.cond(
                             max_rank_count == 3,
-                            lambda: 3 + int(hand_complexity) % 100,
+                            lambda: 3 + jnp.array(hand_complexity, dtype=jnp.int32) % 100,
                             lambda: jax.lax.cond(
                                 (max_rank_count == 2) & (unique_ranks == 3),
                                 lambda: 2 + jnp.sum(rank_products) % 100,
                                 lambda: jax.lax.cond(
                                     max_rank_count == 2,
                                     lambda: 1 + jnp.sum(suit_products) % 100,
-                                    lambda: 0 + int(hand_complexity) % 100
+                                    lambda: 0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100
                                 )
                             )
                         )
