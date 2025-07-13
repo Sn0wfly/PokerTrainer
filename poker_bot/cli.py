@@ -2076,9 +2076,12 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         logger.info("=" * 60)
         
         for iteration in range(iterations):
+            logger.info(f"🔄 Starting iteration {iteration + 1}/{iterations}...")
+            
             # Generate RNG keys for batch
             rng_key = jr.fold_in(rng_key, iteration)
             rng_keys = jr.split(rng_key, batch_size)
+            logger.info(f"   Generated {batch_size} RNG keys")
             
             # Game configuration
             game_config = {
@@ -2089,8 +2092,11 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
             }
             
             # 🚀 REAL CFVFP Training Step
+            logger.info(f"   🎮 Running batch simulation...")
             game_results = batch_simulate_real_holdem(rng_keys, game_config)
+            logger.info(f"   ✅ Simulation completed, running trainer step...")
             results = trainer.train_step(rng_key, game_results)
+            logger.info(f"   ✅ Training step completed!")
             
             # Log progress
             if (iteration + 1) % log_interval == 0:
