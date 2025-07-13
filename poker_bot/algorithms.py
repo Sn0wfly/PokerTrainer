@@ -449,8 +449,8 @@ class AdvancedCFRSuite:
                         current_strategy: jnp.ndarray) -> Dict[str, Any]:
         """Execute neural FSP step"""
         # Convert info state to neural network input
-        info_state_vector = jnp.array([info_state.player_id, info_state.betting_round, 
-                                     info_state.pot_size, info_state.num_players])
+        info_state_vector = jnp.array([info_state.player_id, info_state.round, 
+                                     info_state.pot, 2.0])  # num_players fixed to 2
         
         # Pad to required input size
         input_size = 32
