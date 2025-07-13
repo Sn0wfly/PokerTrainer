@@ -235,7 +235,8 @@ class OutcomeSamplingCFR:
                                        payoffs: jnp.ndarray) -> jnp.ndarray:
         """Compute utility using outcome sampling"""
         # Importance sampling correction
-        importance_weights = 1.0 / (sampling_probs + self.config.epsilon)
+        epsilon = 1e-8  # Small value to prevent division by zero
+        importance_weights = 1.0 / (sampling_probs + epsilon)
         
         # Weighted utility
         weighted_utility = payoffs * importance_weights
