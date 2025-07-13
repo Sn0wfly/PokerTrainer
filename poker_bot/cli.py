@@ -1999,5 +1999,143 @@ def vectorized_cfr_training(rng_keys: jnp.ndarray, game_config: Dict[str, Any]) 
     
     return enhanced_results
 
+@cli.command()
+@click.option('--iterations', default=10000, help='Number of training iterations')
+@click.option('--batch-size', default=8192, help='Batch size for training')
+@click.option('--learning-rate', default=0.1, help='Learning rate')
+@click.option('--temperature', default=1.0, help='Temperature for strategy computation')
+@click.option('--save-interval', default=1000, help='Save model every N iterations')
+@click.option('--log-interval', default=100, help='Log progress every N iterations')
+@click.option('--save-path', default='models/cfvfp_model.pkl', help='Path to save trained model')
+@click.option('--gpu/--no-gpu', default=True, help='Use GPU acceleration')
+def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperature: float,
+                save_interval: int, log_interval: int, save_path: str, gpu: bool):
+    """
+    🚀 CFVFP Training: Counterfactual Value Based Fictitious Play
+    Target: 1000+ games/sec on RTX 3090
+    
+    Key Innovations:
+    - Q-values instead of regrets (2.9x speedup)
+    - Pure best-response strategy (argmax Q)
+    - Vectorized operations for GPU saturation
+    """
+    
+    # Import CFVFP modules
+    try:
+        from .cfvfp_optimized import OptimizedCFVFPTrainer, CFVFPConfig
+        from .nlhe_real_engine import nlhe_6player_batch
+        import jax.random as jr
+        import time
+        import pickle
+        import os
+        
+        logger.info("🚀 Starting CFVFP Training")
+        logger.info("=" * 60)
+        logger.info(f"Algorithm: CFVFP (NeurIPS 2024)")
+        logger.info(f"Iterations: {iterations}")
+        logger.info(f"Batch size: {batch_size}")
+        logger.info(f"Learning rate: {learning_rate}")
+        logger.info(f"Temperature: {temperature}")
+        logger.info(f"Target: 1000+ games/sec")
+        logger.info("")
+        
+        # Create models directory
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Initialize CFVFP trainer
+        config = CFVFPConfig(
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            temperature=temperature
+        )
+        trainer = OptimizedCFVFPTrainer(config)
+        
+        # Training loop
+        logger.info("🚀 Starting CFVFP training loop...")
+        start_time = time.time()
+        rng_key = jr.PRNGKey(42)
+        
+        # Warm-up compilation
+        logger.info("🔥 Warming up JAX compilation...")
+        test_rng_keys = jr.split(rng_key, batch_size)
+        test_game_config = {'players': 6, 'starting_stack': 100.0, 'small_blind': 1.0, 'big_blind': 2.0}
+        test_results = batch_simulate_real_holdem(test_rng_keys, test_game_config)
+        _ = trainer.train_step(rng_key, test_results)
+        
+        # Training loop
+        logger.info("🚀 CFVFP Training Progress:")
+        logger.info("=" * 60)
+        
+        for iteration in range(iterations):
+            # Generate RNG keys for batch
+            rng_key = jr.fold_in(rng_key, iteration)
+            rng_keys = jr.split(rng_key, batch_size)
+            
+            # Game configuration
+            game_config = {
+                'players': 6,
+                'starting_stack': 100.0,
+                'small_blind': 1.0,
+                'big_blind': 2.0
+            }
+            
+            # 🚀 CFVFP Training Step
+            game_results = batch_simulate_real_holdem(rng_keys, game_config)
+            results = trainer.train_step(rng_key, game_results)
+            
+            # Log progress
+            if (iteration + 1) % log_interval == 0:
+                elapsed = time.time() - start_time
+                games_per_second = results['total_games'] / elapsed
+                
+                logger.info(f"🎯 Iteration {iteration + 1}/{iterations}")
+                logger.info(f"   Games/sec: {games_per_second:,.1f}")
+                logger.info(f"   Total games: {results['total_games']:,}")
+                logger.info(f"   Avg payoff: {results['avg_payoff']:.4f}")
+                logger.info(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
+                logger.info(f"   Q-value mean: {results['q_value_mean']:.4f}")
+                logger.info(f"   Strategy diversity: {results['strategy_diversity']:.4f}")
+                logger.info(f"   Elapsed time: {elapsed:.1f}s")
+                logger.info(f"   Target achieved: {'✅' if games_per_second > 1000 else '❌'}")
+                logger.info("")
+            
+            # Save checkpoint
+            if (iteration + 1) % save_interval == 0:
+                checkpoint_path = save_path.replace('.pkl', f'_checkpoint_{iteration + 1}.pkl')
+                trainer.save_model(checkpoint_path)
+                logger.info(f"💾 Checkpoint saved: {checkpoint_path}")
+        
+        # Final results
+        total_time = time.time() - start_time
+        final_games_per_second = results['total_games'] / total_time
+        
+        logger.info("🎉 CFVFP Training Completed!")
+        logger.info("=" * 60)
+        logger.info(f"🚀 Final Performance:")
+        logger.info(f"   Total iterations: {iterations}")
+        logger.info(f"   Total games: {results['total_games']:,}")
+        logger.info(f"   Total time: {total_time:.1f}s")
+        logger.info(f"   Average games/sec: {final_games_per_second:,.1f}")
+        logger.info(f"   Target achieved: {'✅' if final_games_per_second > 1000 else '❌'}")
+        logger.info("")
+        logger.info(f"🧠 CFVFP Algorithm Results:")
+        logger.info(f"   Q-value mean: {results['q_value_mean']:.4f}")
+        logger.info(f"   Q-value std: {results['q_value_std']:.4f}")
+        logger.info(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
+        logger.info(f"   Strategy diversity: {results['strategy_diversity']:.4f}")
+        logger.info("")
+        logger.info(f"💾 Final model saved: {save_path}")
+        
+        # Save final model
+        trainer.save_model(save_path)
+        
+    except ImportError as e:
+        logger.error(f"❌ CFVFP module import failed: {e}")
+        logger.error("Make sure cfvfp_optimized.py is available")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"❌ CFVFP training failed: {e}")
+        sys.exit(1)
+
 if __name__ == '__main__':
     cli() 
