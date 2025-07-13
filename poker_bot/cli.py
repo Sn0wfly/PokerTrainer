@@ -78,7 +78,13 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     
     # Deal hole cards (simplified random assignment)
     rng_key, subkey = jax.random.split(rng_key)
-    hole_cards = jax.random.permutation(subkey, jnp.arange(52))[:players*2]
+    # Use fixed size array and dynamic slice for JAX compatibility
+    shuffled_deck = jax.random.permutation(subkey, jnp.arange(52))
+    # Use static size (MAX_PLAYERS * 2 = 12 cards max)
+    hole_cards = jax.lax.dynamic_slice(shuffled_deck, [0], [MAX_PLAYERS * 2])
+    # Apply mask to get only the cards we need for actual players
+    cards_needed = players * 2
+    hole_cards = jnp.where(jnp.arange(MAX_PLAYERS * 2) < cards_needed, hole_cards, -1)
     
     # Game loop state
     loop_state = {
