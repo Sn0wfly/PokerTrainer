@@ -1858,29 +1858,29 @@ def gpu_intensive_hand_evaluation(all_cards: jnp.ndarray) -> jnp.ndarray:
     # GPU-INTENSIVE: Complex conditional with matrix operations
     hand_strength = jax.lax.cond(
         is_flush & is_straight,
-        lambda: 8 + jnp.sum(rank_products) % 100,  # Add complexity
+        lambda: jnp.array(8.0 + jnp.sum(rank_products) % 100, dtype=jnp.float32),  # Add complexity
         lambda: jax.lax.cond(
             max_rank_count == 4,
-            lambda: 7 + jnp.sum(suit_products) % 100,
+            lambda: jnp.array(7.0 + jnp.sum(suit_products) % 100, dtype=jnp.float32),
             lambda: jax.lax.cond(
                 (max_rank_count == 3) & (unique_ranks == 2),
-                lambda: 6 + jnp.array(hand_complexity, dtype=jnp.int32) % 100,
+                lambda: jnp.array(6.0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100, dtype=jnp.float32),
                 lambda: jax.lax.cond(
                     is_flush,
-                    lambda: 5 + jnp.sum(rank_matrix) % 100,
+                    lambda: jnp.array(5.0 + jnp.sum(rank_matrix) % 100, dtype=jnp.float32),
                     lambda: jax.lax.cond(
                         is_straight,
-                        lambda: 4 + jnp.sum(suit_matrix) % 100,
+                        lambda: jnp.array(4.0 + jnp.sum(suit_matrix) % 100, dtype=jnp.float32),
                         lambda: jax.lax.cond(
                             max_rank_count == 3,
-                            lambda: 3 + jnp.array(hand_complexity, dtype=jnp.int32) % 100,
+                            lambda: jnp.array(3.0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100, dtype=jnp.float32),
                             lambda: jax.lax.cond(
                                 (max_rank_count == 2) & (unique_ranks == 3),
-                                lambda: 2 + jnp.sum(rank_products) % 100,
+                                lambda: jnp.array(2.0 + jnp.sum(rank_products) % 100, dtype=jnp.float32),
                                 lambda: jax.lax.cond(
                                     max_rank_count == 2,
-                                    lambda: 1 + jnp.sum(suit_products) % 100,
-                                    lambda: 0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100
+                                    lambda: jnp.array(1.0 + jnp.sum(suit_products) % 100, dtype=jnp.float32),
+                                    lambda: jnp.array(0.0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100, dtype=jnp.float32)
                                 )
                             )
                         )
@@ -1890,7 +1890,7 @@ def gpu_intensive_hand_evaluation(all_cards: jnp.ndarray) -> jnp.ndarray:
         )
     )
     
-    return hand_strength % 10  # Keep original scale 0-8
+    return jnp.array(hand_strength % 10, dtype=jnp.float32)  # Keep original scale 0-8
 
 @jax.jit
 def vectorized_cfr_training(rng_keys: jnp.ndarray, game_config: Dict[str, Any]) -> Dict[str, Any]:
