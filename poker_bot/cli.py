@@ -189,7 +189,7 @@ def simulate_single_game_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     payoffs = payoffs * player_mask
     
     return {
-        'payoffs': payoffs[:players],  # Only return payoffs for actual players
+        'payoffs': payoffs,  # Return full array (will be masked later)
         'info_sets_count': final_state['info_sets_count'],
         'decisions_made': final_state['decisions'],
         'final_pot': total_pot,
