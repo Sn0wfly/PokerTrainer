@@ -27,7 +27,7 @@ from collections import defaultdict, deque
 import threading
 import weakref
 
-from .gpu_config import get_device_info, configure_mixed_precision
+from .gpu_config import get_device_info, setup_mixed_precision
 from .memory import MemoryMonitor, get_memory_usage, AdaptiveBatchManager
 from .modern_cfr import CFVFPConfig
 

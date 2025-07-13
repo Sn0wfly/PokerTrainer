@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 
-from .gpu_config import get_device_info, configure_mixed_precision
+from .gpu_config import get_device_info, setup_mixed_precision
 from .memory import MemoryMonitor, get_memory_usage
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class MultiGPUTrainer:
         logger.info(f"Initializing MultiGPU trainer with {self.num_devices} devices")
         
         # Configure mixed precision
-        configure_mixed_precision()
+        setup_mixed_precision()
         
         # Initialize device mesh for parallel training
         self._setup_device_mesh()

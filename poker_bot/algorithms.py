@@ -23,7 +23,7 @@ import time
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
-from .gpu_config import configure_mixed_precision
+from .gpu_config import setup_mixed_precision
 from .memory import MemoryMonitor
 from .modern_cfr import InfoState, CFVFPConfig
 
@@ -67,7 +67,7 @@ class PDCFRPlus:
     
     def __init__(self, config: PDCFRConfig):
         self.config = config
-        configure_mixed_precision()
+        setup_mixed_precision()
         
         # Initialize Adam-style optimizers for regret and strategy
         self.regret_optimizer = self._create_optimizer()
