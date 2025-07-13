@@ -60,7 +60,7 @@ def test_real_cfvfp():
         print(f"   Q-values count: {results['q_values_count']:,}")
         print(f"   Strategies count: {results['strategies_count']:,}")
         print(f"   Avg payoff: {results['avg_payoff']:.4f}")
-        print(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
+        print(f"   Strategy entropy: {float(results['strategy_entropy']):.4f}")
         
         # Test model saving
         print("\n💾 Testing model saving...")
