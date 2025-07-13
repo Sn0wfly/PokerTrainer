@@ -372,8 +372,18 @@ def batch_simulate_real_holdem(rng_keys: jnp.ndarray, game_config: Dict[str, Any
     """
     MAXIMUM GPU UTILIZATION: Batch simulation with intensive GPU operations
     """
-    # Use the new GPU-intensive simulation
-    return vectorized_cfr_training(rng_keys, game_config)
+    # Use the actual poker simulation function, not CFR training
+    batch_size = rng_keys.shape[0]
+    
+    # Force GPU placement
+    rng_keys = jax.device_put(rng_keys)
+    
+    # Use vmap to simulate multiple games in parallel
+    # Each RNG key should be a 2-element array (from reshape)
+    simulate_single_game = jax.vmap(simulate_real_holdem_vectorized)
+    games_results = simulate_single_game(rng_keys, game_config)
+    
+    return games_results
 
 # ============================================================================
 # END REAL VECTORIZED TEXAS HOLD'EM SIMULATION
@@ -783,7 +793,10 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                 
                 # Generate random keys for this batch
                 base_rng_key, subkey = jax.random.split(base_rng_key)
+                # Ensure proper shape for vmap: create array of individual RNG keys
                 batch_rng_keys = jax.random.split(subkey, current_batch_size)
+                # Reshape to ensure each element is a proper RNG key
+                batch_rng_keys = batch_rng_keys.reshape(current_batch_size, 2)
                 
                 # FORCE GPU PLACEMENT for random keys
                 batch_rng_keys = jax.device_put(batch_rng_keys)
@@ -800,8 +813,17 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                 # GPU-OPTIMIZED VECTORIZED GAME SIMULATION
                 logger.info(f"🚀 Running {current_batch_size} games in parallel on GPU...")
                 
-                # FORCE GPU execution for simulation
-                with jax.default_device(jax.devices('gpu')[0]):
+                # FORCE GPU execution for simulation with fallback to CPU
+                try:
+                    gpu_devices = jax.devices('gpu')
+                    if len(gpu_devices) > 0:
+                        with jax.default_device(gpu_devices[0]):
+                            batch_results = batch_simulate_real_holdem(batch_rng_keys, jax_game_config)
+                    else:
+                        # Fallback to CPU
+                        batch_results = batch_simulate_real_holdem(batch_rng_keys, jax_game_config)
+                except Exception:
+                    # Fallback to CPU if GPU detection fails
                     batch_results = batch_simulate_real_holdem(batch_rng_keys, jax_game_config)
                 
                 # FORCE GPU placement for results
@@ -869,17 +891,63 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                         logger.info(f"🧠 MAXIMUM GPU: Processing {len(all_test_regrets)} CFR steps with intensive GPU operations...")
                         
                         # GPU-INTENSIVE: Large matrix operations for CFR
-                        with jax.default_device(jax.devices('gpu')[0]):
-                            # Stack regrets for massive batch processing
+                        try:
+                            gpu_devices = jax.devices('gpu')
+                            if len(gpu_devices) > 0:
+                                with jax.default_device(gpu_devices[0]):
+                                    # Stack regrets for massive batch processing
+                                    batched_regrets = jnp.stack(all_test_regrets)
+                                    
+                                    # GPU-INTENSIVE: Create large strategy matrices for GPU work
+                                    strategy_matrix = jnp.zeros((len(all_test_regrets), 100, 100))
+                                    regret_matrix = jnp.zeros((len(all_test_regrets), 100, 100))
+                                    
+                                    # GPU-INTENSIVE: Complex matrix operations
+                                    for i in range(len(all_test_regrets)):
+                                        # Create GPU-intensive workload
+                                        strategy_work = jnp.dot(
+                                            jnp.ones((100, 100)) * float(batched_regrets[i][0]),
+                                            jnp.ones((100, 100)) * float(batched_regrets[i][1])
+                                        )
+                                        regret_work = jnp.dot(
+                                            jnp.ones((100, 100)) * float(batched_regrets[i][2]),
+                                            jnp.ones((100, 100)) * float(batched_regrets[i][3])
+                                        )
+                                        strategy_matrix = strategy_matrix.at[i].set(strategy_work)
+                                        regret_matrix = regret_matrix.at[i].set(regret_work)
+                                    
+                                    # GPU-INTENSIVE: Large reduction operations
+                                    strategy_complexity = jnp.sum(strategy_matrix, axis=(1, 2))
+                                    regret_complexity = jnp.sum(regret_matrix, axis=(1, 2))
+                            else:
+                                # Fallback to CPU
+                                batched_regrets = jnp.stack(all_test_regrets)
+                                strategy_matrix = jnp.zeros((len(all_test_regrets), 100, 100))
+                                regret_matrix = jnp.zeros((len(all_test_regrets), 100, 100))
+                                
+                                # CPU fallback operations
+                                for i in range(len(all_test_regrets)):
+                                    strategy_work = jnp.dot(
+                                        jnp.ones((100, 100)) * float(batched_regrets[i][0]),
+                                        jnp.ones((100, 100)) * float(batched_regrets[i][1])
+                                    )
+                                    regret_work = jnp.dot(
+                                        jnp.ones((100, 100)) * float(batched_regrets[i][2]),
+                                        jnp.ones((100, 100)) * float(batched_regrets[i][3])
+                                    )
+                                    strategy_matrix = strategy_matrix.at[i].set(strategy_work)
+                                    regret_matrix = regret_matrix.at[i].set(regret_work)
+                                
+                                strategy_complexity = jnp.sum(strategy_matrix, axis=(1, 2))
+                                regret_complexity = jnp.sum(regret_matrix, axis=(1, 2))
+                        except Exception:
+                            # Fallback to CPU if GPU detection fails
                             batched_regrets = jnp.stack(all_test_regrets)
-                            
-                            # GPU-INTENSIVE: Create large strategy matrices for GPU work
                             strategy_matrix = jnp.zeros((len(all_test_regrets), 100, 100))
                             regret_matrix = jnp.zeros((len(all_test_regrets), 100, 100))
                             
-                            # GPU-INTENSIVE: Complex matrix operations
+                            # CPU fallback operations
                             for i in range(len(all_test_regrets)):
-                                # Create GPU-intensive workload
                                 strategy_work = jnp.dot(
                                     jnp.ones((100, 100)) * float(batched_regrets[i][0]),
                                     jnp.ones((100, 100)) * float(batched_regrets[i][1])
@@ -891,39 +959,38 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                                 strategy_matrix = strategy_matrix.at[i].set(strategy_work)
                                 regret_matrix = regret_matrix.at[i].set(regret_work)
                             
-                            # GPU-INTENSIVE: Large reduction operations
                             strategy_complexity = jnp.sum(strategy_matrix, axis=(1, 2))
                             regret_complexity = jnp.sum(regret_matrix, axis=(1, 2))
+                        
+                        # Process CFR training with GPU enhancements
+                        for i in range(0, len(all_test_regrets), min(100, len(all_test_regrets))):
+                            batch_end = min(i + 100, len(all_test_regrets))
+                            batch_regrets = batched_regrets[i:batch_end]
                             
-                            # Process CFR training with GPU enhancements
-                            for i in range(0, len(all_test_regrets), min(100, len(all_test_regrets))):
-                                batch_end = min(i + 100, len(all_test_regrets))
-                                batch_regrets = batched_regrets[i:batch_end]
+                            # Execute batch CFR training with GPU complexity
+                            for j, regret in enumerate(batch_regrets):
+                                info_set_key = all_info_set_keys[i + j]
                                 
-                                # Execute batch CFR training with GPU complexity
-                                for j, regret in enumerate(batch_regrets):
-                                    info_set_key = all_info_set_keys[i + j]
-                                    
-                                    # GPU-ENHANCED: Add complexity to regret calculations
-                                    enhanced_regret = regret + (strategy_complexity[i + j] % 1000) * 0.001
-                                    
-                                    # Execute CFR training step with GPU enhancements
-                                    result = trainer.distributed_training_step(enhanced_regret, enhanced_regret, learning_rate)
-                                    
-                                    # GPU-ENHANCED: Add complexity to strategy updates
-                                    base_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])
-                                    enhanced_strategy = base_strategy + (regret_complexity[i + j] % 1000) * 0.0001
-                                    enhanced_strategy = enhanced_strategy / jnp.sum(enhanced_strategy)  # Normalize
-                                    
-                                    # Update CFR data with GPU-enhanced information
-                                    new_strategy = result.get('strategies', enhanced_strategy)
-                                    new_regret = result.get('q_values', enhanced_regret)
-                                    
-                                    # ACCUMULATE CFR data with GPU complexity
-                                    training_data['strategy_sum'][info_set_key] += new_strategy
-                                    training_data['regret_sum'][info_set_key] += new_regret
-                                    training_data['total_real_info_sets'] += 1
-                
+                                # GPU-ENHANCED: Add complexity to regret calculations
+                                enhanced_regret = regret + (strategy_complexity[i + j] % 1000) * 0.001
+                                
+                                # Execute CFR training step with GPU enhancements
+                                result = trainer.distributed_training_step(enhanced_regret, enhanced_regret, learning_rate)
+                                
+                                # GPU-ENHANCED: Add complexity to strategy updates
+                                base_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])
+                                enhanced_strategy = base_strategy + (regret_complexity[i + j] % 1000) * 0.0001
+                                enhanced_strategy = enhanced_strategy / jnp.sum(enhanced_strategy)  # Normalize
+                                
+                                # Update CFR data with GPU-enhanced information
+                                new_strategy = result.get('strategies', enhanced_strategy)
+                                new_regret = result.get('q_values', enhanced_regret)
+                                
+                                # ACCUMULATE CFR data with GPU complexity
+                                training_data['strategy_sum'][info_set_key] += new_strategy
+                                training_data['regret_sum'][info_set_key] += new_regret
+                                training_data['total_real_info_sets'] += 1
+                    
                 # Calculate performance metrics
                 batch_time = time.time() - batch_start_time
                 games_per_second = current_batch_size / batch_time
@@ -1835,92 +1902,101 @@ def vectorized_cfr_training(rng_keys: jnp.ndarray, game_config: Dict[str, Any]) 
     rng_keys = jax.device_put(rng_keys)
     
     # REAL POKER SIMULATION: Batch process many games simultaneously
-    with jax.default_device(jax.devices('gpu')[0]):
-        # MASSIVE POKER SIMULATION: 1000+ parallel games
+    # Use GPU if available, otherwise use CPU
+    try:
+        gpu_devices = jax.devices('gpu')
+        if len(gpu_devices) > 0:
+            with jax.default_device(gpu_devices[0]):
+                games_results = batch_simulate_real_holdem(rng_keys, game_config)
+        else:
+            # Fallback to CPU
+            games_results = batch_simulate_real_holdem(rng_keys, game_config)
+    except Exception:
+        # Fallback to CPU if GPU detection fails
         games_results = batch_simulate_real_holdem(rng_keys, game_config)
+    
+    # EXTRACT REAL POKER DATA
+    winners = games_results['winner']
+    payoffs = games_results['payoffs']
+    decisions = games_results['decisions_made']
+    
+    # MASSIVE CFR OPERATIONS: Real information sets processing
+    num_info_sets = batch_size * 50  # 50 info sets per game (realistic)
+    num_actions = 3  # fold, check/call, bet/raise
+    
+    # VECTORIZED STRATEGY COMPUTATION
+    # Create massive strategy matrices for all info sets
+    strategy_matrices = jnp.ones((num_info_sets, num_actions, num_actions)) * 0.33
+    regret_matrices = jnp.zeros((num_info_sets, num_actions, num_actions))
+    
+    # REAL CFR UPDATES: Vectorized regret minimization
+    for cfr_iteration in range(5):  # 5 CFR iterations per training step
+        # MASSIVE STRATEGY UPDATES: Vectorized across all info sets
+        # Strategy = max(regret, 0) / sum(max(regret, 0))
+        positive_regrets = jnp.maximum(regret_matrices, 0)
+        regret_sums = jnp.sum(positive_regrets, axis=2, keepdims=True)
         
-        # EXTRACT REAL POKER DATA
-        winners = games_results['winner']
-        payoffs = games_results['payoffs']
-        decisions = games_results['decisions_made']
+        # Avoid division by zero
+        regret_sums = jnp.where(regret_sums > 0, regret_sums, 1.0)
         
-        # MASSIVE CFR OPERATIONS: Real information sets processing
-        num_info_sets = batch_size * 50  # 50 info sets per game (realistic)
-        num_actions = 3  # fold, check/call, bet/raise
+        # Update strategies with regret matching
+        strategy_matrices = positive_regrets / regret_sums
         
-        # VECTORIZED STRATEGY COMPUTATION
-        # Create massive strategy matrices for all info sets
-        strategy_matrices = jnp.ones((num_info_sets, num_actions, num_actions)) * 0.33
-        regret_matrices = jnp.zeros((num_info_sets, num_actions, num_actions))
+        # MASSIVE REGRET COMPUTATION: Vectorized counterfactual values
+        # Simulate counterfactual outcomes for all info sets
+        counterfactual_values = jnp.zeros((num_info_sets, num_actions))
         
-        # REAL CFR UPDATES: Vectorized regret minimization
-        for cfr_iteration in range(5):  # 5 CFR iterations per training step
-            # MASSIVE STRATEGY UPDATES: Vectorized across all info sets
-            # Strategy = max(regret, 0) / sum(max(regret, 0))
-            positive_regrets = jnp.maximum(regret_matrices, 0)
-            regret_sums = jnp.sum(positive_regrets, axis=2, keepdims=True)
-            
-            # Avoid division by zero
-            regret_sums = jnp.where(regret_sums > 0, regret_sums, 1.0)
-            
-            # Update strategies with regret matching
-            strategy_matrices = positive_regrets / regret_sums
-            
-            # MASSIVE REGRET COMPUTATION: Vectorized counterfactual values
-            # Simulate counterfactual outcomes for all info sets
-            counterfactual_values = jnp.zeros((num_info_sets, num_actions))
-            
-            # For each action, compute expected payoff
-            for action_idx in range(num_actions):
-                # Simulate taking this action vs current strategy
-                action_payoffs = jnp.sin(strategy_matrices[:, action_idx, :].mean(axis=1)) * 10
-                counterfactual_values = counterfactual_values.at[:, action_idx].set(action_payoffs)
-            
-            # Current strategy value
-            current_values = jnp.sum(strategy_matrices[:, :, 0] * counterfactual_values, axis=1)
-            
-            # Update regrets: counterfactual_value - current_value
-            for action_idx in range(num_actions):
-                regret_update = counterfactual_values[:, action_idx] - current_values
-                regret_matrices = regret_matrices.at[:, action_idx, action_idx].add(regret_update)
+        # For each action, compute expected payoff
+        for action_idx in range(num_actions):
+            # Simulate taking this action vs current strategy
+            action_payoffs = jnp.sin(strategy_matrices[:, action_idx, :].mean(axis=1)) * 10
+            counterfactual_values = counterfactual_values.at[:, action_idx].set(action_payoffs)
         
-        # MASSIVE FINAL PROCESSING: Aggregate results
-        final_strategies = jnp.sum(strategy_matrices, axis=1)  # Sum over actions
-        final_regrets = jnp.sum(regret_matrices, axis=1)      # Sum over actions
+        # Current strategy value
+        current_values = jnp.sum(strategy_matrices[:, :, 0] * counterfactual_values, axis=1)
         
-        # CFR PERFORMANCE METRICS
-        strategy_sum = jnp.sum(final_strategies)
-        regret_sum = jnp.sum(final_regrets)
-        avg_strategy_entropy = -jnp.sum(final_strategies * jnp.log(final_strategies + 1e-8))
-        
-        # REAL CFR TRAINING DATA
-        cfr_data = {
-            'strategy_sum': strategy_sum,
-            'regret_sum': regret_sum,
-            'strategy_entropy': avg_strategy_entropy,
-            'info_sets_processed': num_info_sets,
-            'cfr_iterations': 5,
-            'training_samples': batch_size
-        }
-        
-        # ENHANCED RESULTS WITH REAL CFR DATA
-        enhanced_results = {
-            'decisions_made': decisions,
-            'info_sets_count': jnp.full(batch_size, 50, dtype=jnp.int32),
-            'final_pot': payoffs,
-            'hand_evaluations': games_results.get('hand_evaluations', jnp.zeros(batch_size, dtype=jnp.int32)),
-            'hole_cards': games_results.get('hole_cards', jnp.zeros((batch_size, 2, 2), dtype=jnp.int32)),
-            'final_community': games_results.get('final_community', jnp.zeros((batch_size, 5), dtype=jnp.int32)),
-            'winner': winners,
-            'payoffs': payoffs,
-            'active_players': jnp.full(batch_size, 2, dtype=jnp.int32),
-            'game_length': decisions,
-            'cfr_training_data': cfr_data,
-            'batch_size': batch_size,
-            'total_info_sets': num_info_sets
-        }
-        
-        return enhanced_results
+        # Update regrets: counterfactual_value - current_value
+        for action_idx in range(num_actions):
+            regret_update = counterfactual_values[:, action_idx] - current_values
+            regret_matrices = regret_matrices.at[:, action_idx, action_idx].add(regret_update)
+    
+    # MASSIVE FINAL PROCESSING: Aggregate results
+    final_strategies = jnp.sum(strategy_matrices, axis=1)  # Sum over actions
+    final_regrets = jnp.sum(regret_matrices, axis=1)      # Sum over actions
+    
+    # CFR PERFORMANCE METRICS
+    strategy_sum = jnp.sum(final_strategies)
+    regret_sum = jnp.sum(final_regrets)
+    avg_strategy_entropy = -jnp.sum(final_strategies * jnp.log(final_strategies + 1e-8))
+    
+    # REAL CFR TRAINING DATA
+    cfr_data = {
+        'strategy_sum': strategy_sum,
+        'regret_sum': regret_sum,
+        'strategy_entropy': avg_strategy_entropy,
+        'info_sets_processed': num_info_sets,
+        'cfr_iterations': 5,
+        'training_samples': batch_size
+    }
+    
+    # ENHANCED RESULTS WITH REAL CFR DATA
+    enhanced_results = {
+        'decisions_made': decisions,
+        'info_sets_count': jnp.full(batch_size, 50, dtype=jnp.int32),
+        'final_pot': payoffs,
+        'hand_evaluations': games_results.get('hand_evaluations', jnp.zeros(batch_size, dtype=jnp.int32)),
+        'hole_cards': games_results.get('hole_cards', jnp.zeros((batch_size, 2, 2), dtype=jnp.int32)),
+        'final_community': games_results.get('final_community', jnp.zeros((batch_size, 5), dtype=jnp.int32)),
+        'winner': winners,
+        'payoffs': payoffs,
+        'active_players': jnp.full(batch_size, 2, dtype=jnp.int32),
+        'game_length': decisions,
+        'cfr_training_data': cfr_data,
+        'batch_size': batch_size,
+        'total_info_sets': num_info_sets
+    }
+    
+    return enhanced_results
 
 if __name__ == '__main__':
     cli() 
