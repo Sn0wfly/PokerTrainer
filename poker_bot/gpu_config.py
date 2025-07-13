@@ -22,7 +22,7 @@ XLA_FLAGS = (
     '--xla_gpu_all_reduce_combine_threshold_bytes=134217728 '
     '--xla_gpu_reduce_scatter_combine_threshold_bytes=134217728 '
     '--xla_gpu_enable_command_buffer= '
-    '--xla_gpu_memory_limit_slop_factor=0.95 '
+    '--xla_gpu_memory_limit_slop_factor=95 '
 )
 
 def setup_gpu_optimization():
