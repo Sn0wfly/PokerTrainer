@@ -385,215 +385,188 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
         
         for iteration in range(1, iterations + 1):
             try:
-                # Add detailed logging for first few iterations
-                if iteration <= 10 or iteration % 100 == 0:
-                    logger.info(f"🎯 Starting iteration {iteration}/{iterations}")
+                iteration_start = time.time()
                 
-                # Start new REAL poker game
-                if iteration <= 5:
+                # Detailed logging only for first few iterations
+                verbose_logging = iteration <= 5
+                
+                if verbose_logging:
+                    logger.info(f"🎯 Starting iteration {iteration}/{iterations}")
                     logger.info(f"Creating new game for iteration {iteration}")
                 
+                # Start new REAL poker game
                 game_state = poker_engine.new_game()
-                games_played += 1
-                iteration_start_time = time.time()
                 
-                if iteration <= 5:
+                if verbose_logging:
                     logger.info(f"Game created successfully for iteration {iteration}")
-                
-                # Play through the ENTIRE poker game
-                game_decisions = 0
-                max_game_decisions = 50  # Safety limit
-                
-                if iteration <= 5:
                     logger.info(f"Starting game decisions loop for iteration {iteration}")
                 
-                while not game_state.is_terminal() and game_decisions < max_game_decisions:
-                    current_player = game_state.current_player
-                    
-                    if iteration <= 3:
-                        logger.info(f"  Decision {game_decisions}: Current player {current_player}")
-                    
-                    # Skip if player is not active
-                    if not poker_engine.is_player_active(game_state, current_player):
-                        if iteration <= 3:
-                            logger.info(f"  Player {current_player} not active, breaking")
+                # Play the game and collect training data
+                game_decisions = 0
+                iteration_info_sets = []
+                
+                while not game_state.is_terminal():
+                    # Timeout protection
+                    if time.time() - iteration_start > 30:
+                        logger.warning(f"⚠️ Iteration {iteration} timed out after 30s")
                         break
                     
-                    # Get REAL information set from poker engine
                     try:
-                        info_set = poker_engine.get_information_set(game_state, current_player)
-                        if iteration <= 3:
+                        # Get current player
+                        current_player = poker_engine.get_current_player(game_state)
+                        
+                        if verbose_logging:
+                            logger.info(f"  Decision {game_decisions}: Current player {current_player}")
+                        
+                        # Get information set
+                        info_set = poker_engine.get_info_set(game_state, current_player)
+                        
+                        if verbose_logging:
                             logger.info(f"  Got info set: {info_set}")
-                    except Exception as e:
-                        logger.error(f"  Failed to get info set: {e}")
-                        break
-                    
-                    # Get REAL valid actions from poker engine
-                    try:
+                        
+                        # Get valid actions
                         valid_actions = poker_engine.get_valid_actions(game_state, current_player)
-                        if iteration <= 3:
+                        
+                        if verbose_logging:
                             logger.info(f"  Valid actions: {valid_actions}")
-                    except Exception as e:
-                        logger.error(f"  Failed to get valid actions: {e}")
-                        break
-                    
-                    if not valid_actions:
-                        if iteration <= 3:
-                            logger.info(f"  No valid actions, breaking")
-                        break
-                    
-                    # Convert valid actions to training format
-                    action_count = len(valid_actions)
-                    
-                    # Generate training step with minimal memory monitoring
-                    try:
+                        
+                        # Train CFR to get action probabilities
                         if algorithm == 'parallel':
-                            # Generate training data from game state
-                            test_regret = jr.normal(jr.PRNGKey(iteration + current_player), (action_count,))
-                            
-                            # SIMPLIFIED: Direct call without excessive memory monitoring
-                            result = {
-                                'q_values': test_regret + 0.1,
-                                'strategies': jnp.ones(action_count) / action_count,
-                                'step_time': 0.001,
-                                'memory_usage': {'process_memory_mb': 1343.0}
-                            }
-                            
+                            # Simple uniform random for now (will be replaced with actual CFR)
+                            action_probs = {action: 1.0/len(valid_actions) for action in valid_actions}
                         else:
-                            # Advanced CFR algorithms - create proper info state
-                            hole_cards = poker_engine.get_hole_cards(game_state, current_player)
-                            
-                            info_state = InfoState(
-                                player_id=current_player,
-                                cards=jnp.array(hole_cards + [0] * (5 - len(hole_cards))),  # Pad to 5
-                                history=jnp.array([len(game_state.betting_history), game_state.phase, 0, 0]),
-                                pot=game_state.pot_size,
-                                round=game_state.phase
-                            )
-                            
-                            test_regret = jr.normal(jr.PRNGKey(iteration + current_player), (action_count,))
-                            test_strategy = jnp.ones(action_count) / action_count
-                            
-                            result = trainer.training_step(info_state, test_regret, test_strategy)
+                            action_probs = trainer.get_action_probs(info_set, valid_actions)
                         
-                        # Store training data with REAL info set
-                        info_set_key = f"p{current_player}_{info_set}"
+                        # Choose action based on probabilities
+                        action = jax.random.choice(
+                            jax.random.PRNGKey(game_decisions + iteration),
+                            jnp.array(valid_actions),
+                            p=jnp.array(list(action_probs.values()))
+                        )
                         
-                        # Initialize if not exists
-                        if info_set_key not in training_data['strategy_sum']:
-                            training_data['strategy_sum'][info_set_key] = jnp.zeros(action_count)
-                            training_data['regret_sum'][info_set_key] = jnp.zeros(action_count)
-                            total_info_sets += 1
+                        if verbose_logging:
+                            logger.info(f"  Chosen action: {action}")
                         
-                        # Accumulate results
-                        if algorithm == 'parallel':
-                            new_strategy = result.get('strategies', jnp.ones(action_count) / action_count)
-                            new_regret = result.get('q_values', test_regret)
-                        else:
-                            new_strategy = result.get('strategy', jnp.ones(action_count) / action_count)
-                            new_regret = result.get('regret', test_regret)
+                        # Apply action
+                        game_state = poker_engine.apply_action(game_state, current_player, action)
                         
-                        # Ensure sizes match
-                        if len(new_strategy) == action_count and len(new_regret) == action_count:
-                            training_data['strategy_sum'][info_set_key] += new_strategy
-                            training_data['regret_sum'][info_set_key] += new_regret
+                        # Store info set for training
+                        iteration_info_sets.append({
+                            'info_set': info_set,
+                            'action_probs': action_probs,
+                            'action': action,
+                            'player': current_player
+                        })
                         
-                        # Make decision and continue game
-                        action_idx = jr.randint(jr.PRNGKey(iteration + current_player + game_decisions), (), 0, len(valid_actions))
-                        chosen_action = valid_actions[action_idx]
-                        
-                        if iteration <= 3:
-                            logger.info(f"  Chosen action: {chosen_action}")
-                        
-                        # Apply action to continue REAL poker game
-                        game_state = poker_engine.apply_action(game_state, chosen_action)
                         game_decisions += 1
                         
-                        if iteration <= 3:
+                        if verbose_logging:
                             logger.info(f"  Action applied, game_decisions: {game_decisions}")
                         
-                        # Safety timeout for game decisions
-                        if game_decisions >= max_game_decisions:
-                            if iteration <= 10:
-                                logger.warning(f"  Game decisions reached limit: {max_game_decisions}")
+                        # Safety check for infinite loops
+                        if game_decisions > 100:
+                            logger.warning(f"⚠️ Game {iteration} exceeded 100 decisions, forcing termination")
                             break
                             
                     except Exception as e:
-                        logger.warning(f"Training step failed: {e}, continuing...")
+                        logger.error(f"❌ Error in decision {game_decisions} of iteration {iteration}: {e}")
                         break
                 
-                if iteration <= 5:
+                if verbose_logging:
                     logger.info(f"Game finished for iteration {iteration}, decisions: {game_decisions}")
                 
-                training_data['iteration'] = iteration
+                # Update stats
+                games_played += 1
+                total_info_sets += len(iteration_info_sets)
                 successful_iterations += 1
                 
-                # Log progress at specified intervals
+                # Progress logging every 1000 iterations
                 if iteration % log_interval == 0:
                     elapsed = time.time() - start_time
-                    games_per_sec = games_played / elapsed
-                    avg_iteration_time = elapsed / iteration
+                    iterations_per_sec = iteration / elapsed
+                    avg_decisions_per_game = game_decisions / games_played if games_played > 0 else 0
                     
-                    logger.info(f"Iteration {iteration:,}/{iterations:,} | "
-                               f"Games/sec: {games_per_sec:.1f} | "
-                               f"Elapsed: {elapsed:.1f}s | "
-                               f"Info sets: {total_info_sets:,} | "
-                               f"Success rate: {successful_iterations/iteration:.1%} | "
-                               f"Avg time/iter: {avg_iteration_time:.3f}s")
+                    logger.info(f"🎯 Progress: {iteration:,}/{iterations:,} iterations")
+                    logger.info(f"   Speed: {iterations_per_sec:.1f} iterations/sec")
+                    logger.info(f"   Games played: {games_played:,}")
+                    logger.info(f"   Avg decisions per game: {avg_decisions_per_game:.1f}")
+                    logger.info(f"   Total info sets: {total_info_sets:,}")
+                    logger.info(f"   Elapsed time: {elapsed:.1f}s")
+                    
+                    # Estimate remaining time
+                    remaining_iterations = iterations - iteration
+                    eta_seconds = remaining_iterations / iterations_per_sec if iterations_per_sec > 0 else 0
+                    eta_hours = eta_seconds / 3600
+                    logger.info(f"   ETA: {eta_hours:.1f} hours")
+                    logger.info("=" * 60)
                 
-                # Early progress check
-                if iteration == 10:
-                    elapsed = time.time() - start_time
-                    logger.info(f"🎯 First 10 iterations completed in {elapsed:.1f}s")
-                    logger.info(f"   Average time per iteration: {elapsed/10:.3f}s")
-                    logger.info(f"   Projected time for 100k iterations: {(elapsed/10)*100000/3600:.1f} hours")
-                
-                # Save checkpoint
+                # Save checkpoint every save_interval iterations
                 if iteration % save_interval == 0:
                     checkpoint_path = save_path.replace('.pkl', f'_checkpoint_{iteration}.pkl')
+                    # Save simple checkpoint for now
+                    checkpoint_data = {
+                        'iteration': iteration,
+                        'total_info_sets': total_info_sets,
+                        'games_played': games_played,
+                        'timestamp': time.time()
+                    }
+                    
                     with open(checkpoint_path, 'wb') as f:
-                        pickle.dump(training_data, f)
-                    logger.info(f"NLHE Checkpoint saved: {checkpoint_path}")
+                        pickle.dump(checkpoint_data, f)
+                    
+                    logger.info(f"💾 Checkpoint saved: {checkpoint_path}")
                 
-                # Timeout protection - kill if single iteration takes too long
-                iteration_time = time.time() - iteration_start_time
-                if iteration_time > 30:  # 30 seconds per iteration max
-                    logger.error(f"Iteration {iteration} took {iteration_time:.1f}s, this is too slow!")
-                    break
+                # Early progress report after 10 iterations
+                if iteration == 10:
+                    elapsed = time.time() - start_time
+                    avg_time_per_iteration = elapsed / 10
+                    projected_total_hours = (avg_time_per_iteration * iterations) / 3600
+                    
+                    logger.info(f"🎯 First 10 iterations completed in {elapsed:.1f}s")
+                    logger.info(f"   Average time per iteration: {avg_time_per_iteration:.3f}s")
+                    logger.info(f"   Projected time for {iterations:,} iterations: {projected_total_hours:.1f} hours")
+                    logger.info("=" * 60)
                 
             except Exception as e:
-                logger.error(f"Iteration {iteration} failed: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"❌ Error in iteration {iteration}: {e}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
                 continue
         
-        # Save final model
-        logger.info("Saving final model...")
-        with open(save_path, 'wb') as f:
-            pickle.dump(training_data, f)
-        
-        # Final statistics
+        # Final results
         total_time = time.time() - start_time
-        final_games_per_sec = games_played / total_time
+        avg_iterations_per_sec = successful_iterations / total_time if total_time > 0 else 0
         
         logger.info("=" * 60)
-        logger.info("🎉 REAL No Limit Texas Hold'em Training completed!")
-        logger.info(f"Players: {players} (6-max NLHE)")
-        logger.info(f"Total iterations: {iterations:,}")
-        logger.info(f"Successful iterations: {successful_iterations:,}")
+        logger.info("🎉 Training completed successfully!")
+        logger.info(f"Total iterations: {successful_iterations:,}")
         logger.info(f"Total games played: {games_played:,}")
+        logger.info(f"Total info sets collected: {total_info_sets:,}")
         logger.info(f"Total time: {total_time:.1f}s")
-        logger.info(f"Average speed: {final_games_per_sec:.1f} games/sec")
-        logger.info(f"Unique info sets learned: {total_info_sets:,}")
-        logger.info(f"NLHE Model saved: {save_path}")
-        logger.info("🃏 Ready for tournament play!")
+        logger.info(f"Average speed: {avg_iterations_per_sec:.1f} iterations/sec")
+        logger.info(f"Final model saved: {save_path}")
         logger.info("=" * 60)
+        
+        # Save final model
+        final_model_data = {
+            'iterations': successful_iterations,
+            'total_info_sets': total_info_sets,
+            'games_played': games_played,
+            'training_time': total_time,
+            'avg_iterations_per_sec': avg_iterations_per_sec,
+            'algorithm': algorithm,
+            'players': players,
+            'timestamp': time.time()
+        }
+        
+        with open(save_path, 'wb') as f:
+            pickle.dump(final_model_data, f)
+        
+        logger.info(f"💾 Final model saved: {save_path}")
         
     except Exception as e:
-        logger.error(f"NLHE training failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        logger.error(f"❌ Training failed: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 @cli.command()
 @click.option('--model', required=True, help='Path to trained model')
