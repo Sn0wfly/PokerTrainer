@@ -380,7 +380,7 @@ def batch_simulate_real_holdem(rng_keys: jnp.ndarray, game_config: Dict[str, Any
     
     # Use vmap to simulate multiple games in parallel
     # Each RNG key should be a 2-element array (from reshape)
-    simulate_single_game = jax.vmap(simulate_real_holdem_vectorized)
+    simulate_single_game = jax.vmap(simulate_real_holdem_vectorized, in_axes=(0, None))
     games_results = simulate_single_game(rng_keys, game_config)
     
     return games_results
@@ -793,9 +793,10 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                 
                 # Generate random keys for this batch
                 base_rng_key, subkey = jax.random.split(base_rng_key)
-                # Ensure proper shape for vmap: create array of individual RNG keys
+                # Generate individual RNG keys for each game in the batch
+                # Use a more explicit approach to ensure proper shape
                 batch_rng_keys = jax.random.split(subkey, current_batch_size)
-                # Reshape to ensure each element is a proper RNG key
+                # Ensure the shape is correct for vmap - reshape to (batch_size, 2)
                 batch_rng_keys = batch_rng_keys.reshape(current_batch_size, 2)
                 
                 # FORCE GPU PLACEMENT for random keys
