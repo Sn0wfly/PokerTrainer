@@ -240,10 +240,15 @@ class RealCFVFPTrainer:
         batch_size = game_results['payoffs'].shape[0]
         num_players = game_results['payoffs'].shape[1]
         
+        logger.info(f"   📊 Processing {batch_size} games × {num_players} players = {batch_size * num_players} info sets")
+        
         # Process each game and player
         total_info_sets_processed = 0
         
         for game_idx in range(batch_size):
+            if game_idx % 1000 == 0:  # Log every 1000 games
+                logger.info(f"   🎮 Processing game {game_idx + 1}/{batch_size}...")
+            
             for player_id in range(num_players):
                 # Create real information set from game state
                 info_set = self._create_info_set_from_game(game_results, player_id, game_idx)
