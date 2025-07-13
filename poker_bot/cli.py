@@ -1,357 +1,251 @@
 """
-🎮 Command Line Interface for PokerBot
-
-Provides easy-to-use commands for training and playing poker.
+Command Line Interface for PokerTrainer
 """
 
-import click
 import os
 import sys
-import time
+import logging
 from pathlib import Path
 from typing import Optional
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress
-from rich.table import Table
 
-from .trainer import MCCFRTrainer, TrainingConfig
-from .bot import PokerBot, BotConfig
-from .engine import PokerEngine
+import click
+import yaml
+
+from .trainer import create_trainer, MCCFRConfig
+from .bot import PokerBot
+from .engine import PokerEngine, GameConfig
 from .evaluator import HandEvaluator
 
-
-console = Console()
-
-
-def print_banner():
-    """Print the PokerBot banner."""
-    banner = """
-    ♠♥♦♣ PokerBot - GPU-Native Poker AI ♠♥♦♣
-    
-    🚀 Ultra-fast poker training using JAX + MCCFR
-    🎯 Real-time decision making with <1s latency
-    🔥 GPU-accelerated for maximum performance
-    """
-    console.print(Panel(banner, style="bold blue"))
-
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @click.group()
-@click.version_option(version="0.1.0")
-def main():
-    """🎮 PokerBot - GPU-Native Poker AI"""
-    print_banner()
+@click.version_option()
+def cli():
+    """PokerTrainer - GPU-accelerated poker AI training and playing"""
+    pass
 
-
-@main.command()
-@click.option('--iterations', '-i', default=100_000, help='Number of training iterations')
-@click.option('--batch-size', '-b', default=1024, help='Batch size for training')
-@click.option('--players', '-p', default=2, help='Number of players (2-6)')
-@click.option('--save-path', '-s', default='models/', help='Directory to save models')
-@click.option('--config-file', '-c', help='YAML configuration file')
-@click.option('--resume', '-r', help='Resume from checkpoint')
-@click.option('--gpu', is_flag=True, help='Force GPU usage')
-def train(iterations: int, batch_size: int, players: int, save_path: str, 
-          config_file: Optional[str], resume: Optional[str], gpu: bool):
-    """🧠 Train a poker AI using MCCFR"""
+@cli.command()
+@click.option('--iterations', default=100000, help='Number of training iterations')
+@click.option('--batch-size', default=1024, help='Batch size for training')
+@click.option('--players', default=2, help='Number of players')
+@click.option('--learning-rate', default=0.1, help='Learning rate')
+@click.option('--exploration', default=0.1, help='Exploration rate')
+@click.option('--save-interval', default=1000, help='Save model every N iterations')
+@click.option('--log-interval', default=100, help='Log progress every N iterations')
+@click.option('--save-path', default='models/mccfr_model.pkl', help='Path to save trained model')
+@click.option('--config-file', help='YAML configuration file')
+@click.option('--gpu/--no-gpu', default=True, help='Use GPU acceleration (if available)')
+def train(iterations: int, batch_size: int, players: int, learning_rate: float,
+          exploration: float, save_interval: int, log_interval: int,
+          save_path: str, config_file: Optional[str], gpu: bool):
+    """Train poker AI using MCCFR algorithm"""
     
-    console.print("\n🎯 Starting poker AI training...\n")
+    # Create models directory if it doesn't exist
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    # Load configuration from file if provided
+    if config_file:
+        with open(config_file, 'r') as f:
+            config_data = yaml.safe_load(f)
+        
+        # Override with command line arguments
+        config_data.update({
+            'iterations': iterations,
+            'batch_size': batch_size,
+            'players': players,
+            'learning_rate': learning_rate,
+            'exploration': exploration,
+            'save_interval': save_interval,
+            'log_interval': log_interval
+        })
+    else:
+        config_data = {
+            'iterations': iterations,
+            'batch_size': batch_size,
+            'players': players,
+            'learning_rate': learning_rate,
+            'exploration': exploration,
+            'save_interval': save_interval,
+            'log_interval': log_interval
+        }
     
     # Check GPU availability
     if gpu:
-        import jax
-        if not jax.devices('gpu'):
-            console.print("⚠️  Warning: GPU requested but not available!", style="yellow")
-            console.print("Falling back to CPU training (much slower)")
-        else:
-            console.print(f"✅ GPU detected: {jax.devices('gpu')[0]}")
-    
-    # Create training configuration
-    if config_file:
-        # Load from YAML file
-        import yaml
-        with open(config_file, 'r') as f:
-            config_dict = yaml.safe_load(f)
-        config = TrainingConfig(**config_dict)
+        try:
+            import jax
+            devices = jax.devices()
+            gpu_available = len([d for d in devices if 'gpu' in str(d).lower() or 'cuda' in str(d).lower()]) > 0
+            
+            if gpu_available:
+                logger.info(f"GPU acceleration enabled. Devices: {devices}")
+            else:
+                logger.warning("GPU requested but not available. Using CPU.")
+        except Exception as e:
+            logger.warning(f"GPU check failed: {e}. Using CPU.")
     else:
-        config = TrainingConfig(
-            num_iterations=iterations,
-            batch_size=batch_size,
-            num_players=players,
-        )
+        logger.info("Using CPU training (--no-gpu specified)")
     
-    # Display configuration
-    config_table = Table(title="Training Configuration")
-    config_table.add_column("Parameter", style="cyan")
-    config_table.add_column("Value", style="magenta")
-    
-    config_table.add_row("Iterations", f"{config.num_iterations:,}")
-    config_table.add_row("Batch Size", str(config.batch_size))
-    config_table.add_row("Players", str(config.num_players))
-    config_table.add_row("Save Path", save_path)
-    config_table.add_row("Card Buckets", str(config.num_card_buckets))
-    config_table.add_row("Bet Sizes", str(config.bet_sizes))
-    
-    console.print(config_table)
-    console.print()
-    
-    # Initialize trainer
-    trainer = MCCFRTrainer(config)
-    
-    # Resume from checkpoint if specified
-    if resume:
-        console.print(f"📂 Resuming from checkpoint: {resume}")
-        trainer.load_checkpoint(resume)
+    # Create trainer
+    trainer = create_trainer(**config_data)
     
     # Start training
+    logger.info("Starting MCCFR training...")
+    logger.info(f"Configuration: {config_data}")
+    
     try:
-        console.print("🚀 Training started! Press Ctrl+C to stop gracefully.\n")
-        
-        start_time = time.time()
-        results = trainer.train(save_path)
-        end_time = time.time()
-        
-        # Show results
-        console.print("\n✅ Training completed successfully!")
-        console.print(f"⏱️  Total time: {end_time - start_time:.2f} seconds")
-        console.print(f"📁 Model saved to: {results['final_model_path']}")
-        
-        # Show final metrics
-        if results['final_metrics']:
-            metrics_table = Table(title="Final Training Metrics")
-            metrics_table.add_column("Metric", style="cyan")
-            metrics_table.add_column("Value", style="green")
-            
-            for key, value in results['final_metrics'].items():
-                metrics_table.add_row(key, f"{value:.6f}")
-            
-            console.print(metrics_table)
-        
-    except KeyboardInterrupt:
-        console.print("\n⚠️  Training interrupted by user")
-        console.print("💾 Saving current state...")
-        # Save checkpoint
-        trainer._save_checkpoint(save_path, trainer.iteration)
-        console.print("✅ Checkpoint saved successfully")
-    
+        trainer.train(save_path=save_path)
+        logger.info("Training completed successfully!")
     except Exception as e:
-        console.print(f"\n❌ Training failed: {str(e)}", style="red")
+        logger.error(f"Training failed: {e}")
         sys.exit(1)
 
-
-@main.command()
-@click.option('--model', '-m', required=True, help='Path to trained model')
-@click.option('--opponents', '-o', default=1, help='Number of opponents')
-@click.option('--hands', '-h', default=1000, help='Number of hands to play')
-@click.option('--stack', '-s', default=100.0, help='Starting stack size')
-@click.option('--aggressive', is_flag=True, help='Enable aggressive play')
-@click.option('--thinking-time', '-t', default=0.5, help='Thinking time in seconds')
-@click.option('--log-file', '-l', help='Log file for game history')
-def play(model: str, opponents: int, hands: int, stack: float, 
+@cli.command()
+@click.option('--model', required=True, help='Path to trained model')
+@click.option('--hands', default=100, help='Number of hands to play')
+@click.option('--opponents', default=1, help='Number of opponents')
+@click.option('--stack', default=100.0, help='Starting stack size')
+@click.option('--aggressive/--conservative', default=False, help='Play aggressively')
+@click.option('--thinking-time', default=1.0, help='Thinking time in seconds')
+@click.option('--log-file', help='Log game to file')
+def play(model: str, hands: int, opponents: int, stack: float, 
          aggressive: bool, thinking_time: float, log_file: Optional[str]):
-    """🎲 Play poker with the trained AI"""
+    """Play poker using trained AI model"""
     
-    console.print("\n🎲 Starting poker game...\n")
-    
-    # Check if model exists
     if not os.path.exists(model):
-        console.print(f"❌ Model file not found: {model}", style="red")
+        logger.error(f"Model file not found: {model}")
         sys.exit(1)
     
-    # Configure bot
-    config = BotConfig(
-        model_path=model,
-        thinking_time=thinking_time,
-        aggression_factor=1.5 if aggressive else 1.0,
-        enable_logging=True
+    # Setup logging
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        logger.addHandler(file_handler)
+    
+    # Create bot configuration
+    config = GameConfig(
+        players=opponents + 1,
+        starting_stack=stack,
+        big_blind=2.0,
+        small_blind=1.0
     )
     
-    # Initialize bot
+    # Load trained model and create bot
     try:
-        bot = PokerBot(config)
-        console.print("✅ Bot initialized successfully")
+        bot = PokerBot(model_path=model, config=config)
+        logger.info(f"Loaded model from {model}")
     except Exception as e:
-        console.print(f"❌ Failed to initialize bot: {str(e)}", style="red")
+        logger.error(f"Failed to load model: {e}")
         sys.exit(1)
     
-    # Setup game
-    num_players = opponents + 1
-    engine = PokerEngine(num_players=num_players)
-    
-    # Game statistics
-    total_winnings = 0.0
-    hands_won = 0
-    
     # Play games
-    console.print(f"\n🎯 Playing {hands} hands against {opponents} opponents")
-    console.print(f"💰 Starting stack: ${stack:.2f}")
+    logger.info(f"Starting {hands} hands against {opponents} opponents")
+    logger.info(f"Stack: ${stack}, Aggressive: {aggressive}")
     
-    with Progress() as progress:
-        task = progress.add_task("Playing hands...", total=hands)
+    try:
+        results = bot.play_session(
+            hands=hands,
+            thinking_time=thinking_time,
+            aggressive=aggressive
+        )
         
-        for hand_num in range(hands):
-            # Simulate one hand
-            try:
-                # Create new game
-                stacks = [stack] * num_players
-                state = engine.new_game(stacks, button_pos=hand_num % num_players)
-                
-                # Simulate hand (simplified)
-                # In real implementation, would play full hand
-                import random
-                payoff = random.uniform(-stack*0.1, stack*0.1)  # Random outcome for demo
-                
-                total_winnings += payoff
-                if payoff > 0:
-                    hands_won += 1
-                
-                bot.update_game_result(payoff)
-                
-                # Update progress
-                progress.update(task, advance=1)
-                
-            except Exception as e:
-                console.print(f"❌ Error in hand {hand_num}: {str(e)}", style="red")
-                continue
-    
-    # Show final results
-    console.print("\n🎉 Game session completed!")
-    
-    results_table = Table(title="Session Results")
-    results_table.add_column("Metric", style="cyan")
-    results_table.add_column("Value", style="green")
-    
-    results_table.add_row("Hands Played", str(hands))
-    results_table.add_row("Hands Won", str(hands_won))
-    results_table.add_row("Win Rate", f"{hands_won/hands*100:.1f}%")
-    results_table.add_row("Total Winnings", f"${total_winnings:.2f}")
-    results_table.add_row("Avg per Hand", f"${total_winnings/hands:.2f}")
-    
-    # Bot performance stats
-    bot_stats = bot.get_performance_stats()
-    results_table.add_row("Avg Decision Time", f"{bot_stats['avg_decision_time']:.3f}s")
-    results_table.add_row("Max Decision Time", f"{bot_stats['max_decision_time']:.3f}s")
-    
-    console.print(results_table)
-    
-    # Save log file if specified
-    if log_file:
-        with open(log_file, 'w') as f:
-            f.write(f"Poker Bot Session Log\n")
-            f.write(f"=====================\n")
-            f.write(f"Hands: {hands}\n")
-            f.write(f"Opponents: {opponents}\n")
-            f.write(f"Total Winnings: ${total_winnings:.2f}\n")
-            f.write(f"Win Rate: {hands_won/hands*100:.1f}%\n")
+        # Display results
+        logger.info("Session completed!")
+        logger.info(f"Hands played: {results.get('hands_played', 0)}")
+        logger.info(f"Hands won: {results.get('hands_won', 0)}")
+        logger.info(f"Final stack: ${results.get('final_stack', 0):.2f}")
+        logger.info(f"Profit/Loss: ${results.get('profit_loss', 0):.2f}")
         
-        console.print(f"📝 Session log saved to: {log_file}")
+    except Exception as e:
+        logger.error(f"Playing session failed: {e}")
+        sys.exit(1)
 
-
-@main.command()
-@click.option('--model', '-m', help='Path to trained model')
+@cli.command()
+@click.option('--model', help='Path to trained model to evaluate')
 def evaluate(model: Optional[str]):
-    """📊 Evaluate model performance"""
+    """Evaluate poker bot components"""
     
-    console.print("\n📊 Evaluating model performance...\n")
+    logger.info("Evaluating PokerTrainer components...")
     
-    if model:
-        # Load and evaluate specific model
-        if not os.path.exists(model):
-            console.print(f"❌ Model file not found: {model}", style="red")
-            sys.exit(1)
-        
-        console.print(f"📁 Loading model: {model}")
-        
-        # Initialize bot for evaluation
-        config = BotConfig(model_path=model, enable_logging=False)
-        bot = PokerBot(config)
-        
-        # Run evaluation
-        console.print("🔍 Running evaluation tests...")
-        
-        # Test hand evaluator speed
+    # Test hand evaluator
+    try:
         evaluator = HandEvaluator()
-        
-        # Benchmark evaluation speed
-        import time
-        import random
-        
-        num_evaluations = 100_000
-        start_time = time.time()
-        
-        for _ in range(num_evaluations):
-            # Generate random 7-card hand
-            cards = random.sample(range(52), 7)
-            strength = evaluator.evaluate_single(cards)
-        
-        end_time = time.time()
-        evaluations_per_second = num_evaluations / (end_time - start_time)
-        
-        # Show results
-        eval_table = Table(title="Model Evaluation Results")
-        eval_table.add_column("Metric", style="cyan")
-        eval_table.add_column("Value", style="green")
-        
-        eval_table.add_row("Model Path", model)
-        eval_table.add_row("Hand Evaluations/sec", f"{evaluations_per_second:,.0f}")
-        eval_table.add_row("Avg Evaluation Time", f"{1000/evaluations_per_second:.3f}ms")
-        
-        console.print(eval_table)
-        
-    else:
-        # System evaluation
-        console.print("🔍 Running system evaluation...")
-        
-        # Test basic components
-        console.print("✅ Testing hand evaluator...")
-        evaluator = HandEvaluator()
-        
-        # Test a few hands
-        test_hands = [
-            ([48, 49, 50, 51, 44, 45, 46], "Royal Flush"),
-            ([48, 49, 0, 1, 2, 3, 4], "High Card"),
-            ([48, 45, 42, 39, 36, 33, 30], "Flush"),
-        ]
-        
-        for cards, expected in test_hands:
-            strength = evaluator.evaluate_single(cards)
-            rank = evaluator.get_hand_rank(strength)
-            console.print(f"  {expected}: {rank} (strength: {strength})")
-        
-        console.print("✅ Hand evaluator working correctly")
-
-
-@main.command()
-@click.option('--dir', '-d', default='models/', help='Models directory')
-def list_models(dir: str):
-    """📁 List available trained models"""
-    
-    console.print(f"\n📁 Models in {dir}:\n")
-    
-    if not os.path.exists(dir):
-        console.print(f"❌ Directory not found: {dir}", style="red")
+        test_cards = ['2s', '2h', '2d', '2c', '3s', '3h', '3d']
+        result = evaluator.evaluate_hand(test_cards)
+        logger.info(f"✅ Hand evaluator working: {result}")
+    except Exception as e:
+        logger.error(f"❌ Hand evaluator failed: {e}")
         return
     
-    models_table = Table(title="Available Models")
-    models_table.add_column("Model Name", style="cyan")
-    models_table.add_column("Size", style="magenta")
-    models_table.add_column("Modified", style="green")
+    # Test poker engine
+    try:
+        engine = PokerEngine()
+        game_state = engine.new_game()
+        logger.info("✅ Poker engine working")
+    except Exception as e:
+        logger.error(f"❌ Poker engine failed: {e}")
+        return
     
-    found_models = False
-    for file in os.listdir(dir):
-        if file.endswith('.pkl'):
-            file_path = os.path.join(dir, file)
-            size = os.path.getsize(file_path)
-            modified = time.ctime(os.path.getmtime(file_path))
-            
-            models_table.add_row(file, f"{size/1024/1024:.1f}MB", modified)
-            found_models = True
+    # Test JAX
+    try:
+        import jax
+        import jax.numpy as jnp
+        
+        logger.info(f"✅ JAX version: {jax.__version__}")
+        logger.info(f"✅ JAX devices: {jax.devices()}")
+        
+        # Test computation
+        x = jnp.array([1., 2., 3.])
+        result = jnp.sum(x)
+        logger.info(f"✅ JAX computation working: {result}")
+        
+    except Exception as e:
+        logger.error(f"❌ JAX failed: {e}")
+        return
     
-    if found_models:
-        console.print(models_table)
-    else:
-        console.print("No models found in directory", style="yellow")
+    # Test trainer
+    try:
+        trainer = create_trainer(iterations=10, batch_size=4, players=2)
+        logger.info("✅ MCCFR trainer created successfully")
+    except Exception as e:
+        logger.error(f"❌ MCCFR trainer failed: {e}")
+        return
+    
+    # Test model loading if provided
+    if model:
+        if os.path.exists(model):
+            try:
+                config = GameConfig()
+                bot = PokerBot(model_path=model, config=config)
+                logger.info(f"✅ Model loaded successfully: {model}")
+            except Exception as e:
+                logger.error(f"❌ Model loading failed: {e}")
+                return
+        else:
+            logger.warning(f"Model file not found: {model}")
+    
+    logger.info("🎉 All components working!")
 
+@cli.command()
+def list_models():
+    """List available trained models"""
+    
+    models_dir = Path("models")
+    if not models_dir.exists():
+        logger.info("No models directory found")
+        return
+    
+    model_files = list(models_dir.glob("*.pkl"))
+    
+    if not model_files:
+        logger.info("No trained models found")
+        return
+    
+    logger.info("Available models:")
+    for model_file in model_files:
+        size = model_file.stat().st_size / (1024 * 1024)  # MB
+        logger.info(f"  {model_file.name} ({size:.1f} MB)")
 
-if __name__ == "__main__":
-    main() 
+if __name__ == '__main__':
+    cli() 

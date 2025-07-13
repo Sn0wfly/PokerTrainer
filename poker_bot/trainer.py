@@ -1,446 +1,275 @@
 """
-🧠 MCCFR Trainer - GPU-accelerated poker AI training
-
-Uses CFRX for Monte Carlo Counterfactual Regret Minimization on GPU.
+Simplified MCCFR Trainer for Texas Hold'em
+Using JAX directly without CFRX dependency
 """
 
 import jax
 import jax.numpy as jnp
-from cfrx.envs.kuhn_poker.env import KuhnPoker
-from cfrx.policy import TabularPolicy
-from cfrx.trainers.mccfr import MCCFRTrainer as CFRXTrainer
+import jax.random as jr
 from typing import Dict, List, Tuple, Optional, Any
 import numpy as np
+from dataclasses import dataclass
 from tqdm import tqdm
 import pickle
-import os
-from dataclasses import dataclass
-from .engine import PokerEngine, GameState, Action, ActionType, GamePhase
+import logging
+
+from .engine import PokerEngine, GameState, Action
 from .evaluator import HandEvaluator
 
+logger = logging.getLogger(__name__)
 
 @dataclass
-class TrainingConfig:
-    """Configuration for MCCFR training."""
-    num_iterations: int = 100_000
+class MCCFRConfig:
+    """Configuration for MCCFR training"""
+    iterations: int = 100000
     batch_size: int = 1024
-    learning_rate: float = 0.01
-    save_interval: int = 10_000
-    eval_interval: int = 5_000
-    num_players: int = 2
-    starting_stack: float = 100.0
-    small_blind: float = 1.0
-    big_blind: float = 2.0
-    # Card abstraction
-    num_card_buckets: int = 200
-    # Action abstraction
-    bet_sizes: List[float] = None
-    
-    def __post_init__(self):
-        if self.bet_sizes is None:
-            self.bet_sizes = [0.5, 0.75, 1.0, 1.5, 2.0]
+    players: int = 2
+    learning_rate: float = 0.1
+    exploration: float = 0.1
+    save_interval: int = 1000
+    log_interval: int = 100
 
-
-class PokerEnvironment:
+class SimpleMCCFRTrainer:
     """
-    Poker environment wrapper for CFRX training.
-    
-    Adapts our PokerEngine to work with CFRX's expected interface.
+    Simplified Monte Carlo Counterfactual Regret Minimization trainer
+    Uses JAX for acceleration but avoids CFRX dependency
     """
     
-    def __init__(self, config: TrainingConfig):
+    def __init__(self, config: MCCFRConfig):
         self.config = config
-        self.engine = PokerEngine(
-            num_players=config.num_players,
-            small_blind=config.small_blind,
-            big_blind=config.big_blind
-        )
+        self.engine = PokerEngine()
         self.evaluator = HandEvaluator()
         
-        # Information state size (simplified)
-        self.info_state_size = 1000  # Will be refined based on abstractions
+        # Initialize strategy tables
+        self.strategy_sum: Dict[str, jnp.ndarray] = {}
+        self.regret_sum: Dict[str, jnp.ndarray] = {}
         
         # Action space
-        self.action_space_size = len(ActionType) + len(config.bet_sizes)
+        self.actions = ['fold', 'check_call', 'bet_raise']
+        self.n_actions = len(self.actions)
         
-        # Initialize card abstraction
-        self._init_card_abstraction()
+        # JAX random key
+        self.key = jr.PRNGKey(42)
+        
+        logger.info(f"Initialized SimpleMCCFRTrainer with config: {config}")
     
-    def _init_card_abstraction(self):
-        """Initialize card abstraction for reducing state space."""
-        # For now, use simple hand strength buckets
-        # In production, would use EHS (Expected Hand Strength) clustering
-        self.card_buckets = jnp.linspace(0, 1, self.config.num_card_buckets)
-    
-    def get_card_bucket(self, hole_cards: List[int], community_cards: List[int]) -> int:
+    def get_information_set(self, game_state: GameState, player_id: int) -> str:
         """
-        Get card abstraction bucket for given cards.
+        Create information set string for current game state
+        """
+        # Get player's hole cards
+        hole_cards = game_state.hole_cards[player_id]
         
-        Args:
-            hole_cards: Player's hole cards
-            community_cards: Community cards (may be partial)
+        # Get community cards
+        community = game_state.community_cards
+        
+        # Get betting history
+        betting_history = game_state.betting_history[-10:]  # Last 10 actions
+        
+        # Create info set string
+        info_set = f"hole:{hole_cards}_community:{community}_betting:{betting_history}"
+        
+        return info_set
+    
+    def get_strategy(self, info_set: str) -> jnp.ndarray:
+        """
+        Get current strategy for information set
+        """
+        if info_set not in self.regret_sum:
+            # Initialize uniform strategy
+            self.regret_sum[info_set] = jnp.zeros(self.n_actions)
+            self.strategy_sum[info_set] = jnp.zeros(self.n_actions)
+        
+        regrets = self.regret_sum[info_set]
+        
+        # Regret matching
+        positive_regrets = jnp.maximum(regrets, 0)
+        regret_sum = jnp.sum(positive_regrets)
+        
+        if regret_sum > 0:
+            strategy = positive_regrets / regret_sum
+        else:
+            strategy = jnp.ones(self.n_actions) / self.n_actions
+        
+        return strategy
+    
+    def update_strategy(self, info_set: str, strategy: jnp.ndarray):
+        """
+        Update strategy sum for information set
+        """
+        if info_set not in self.strategy_sum:
+            self.strategy_sum[info_set] = jnp.zeros(self.n_actions)
+        
+        self.strategy_sum[info_set] += strategy
+    
+    def sample_action(self, strategy: jnp.ndarray, key: jax.random.PRNGKey) -> Tuple[int, float]:
+        """
+        Sample action from strategy
+        """
+        action_idx = jr.choice(key, self.n_actions, p=strategy)
+        probability = strategy[action_idx]
+        
+        return int(action_idx), float(probability)
+    
+    def cfr_recursive(self, game_state: GameState, player_id: int, 
+                     reach_probs: jnp.ndarray, key: jax.random.PRNGKey) -> float:
+        """
+        Recursive CFR computation
+        """
+        # Check if game is terminal
+        if game_state.is_terminal():
+            return self.get_utility(game_state, player_id)
+        
+        # Get information set
+        info_set = self.get_information_set(game_state, player_id)
+        
+        # Get strategy
+        strategy = self.get_strategy(info_set)
+        
+        # Calculate counterfactual values
+        action_values = jnp.zeros(self.n_actions)
+        
+        for action_idx in range(self.n_actions):
+            # Create new game state
+            new_state = self.apply_action(game_state, action_idx)
             
-        Returns:
-            Bucket index (0 to num_card_buckets-1)
-        """
-        # Simple abstraction based on hand strength
-        if len(community_cards) >= 3:  # Post-flop
-            all_cards = hole_cards + [c for c in community_cards if c >= 0]
-            if len(all_cards) >= 5:
-                strength = self.evaluator.evaluate_single(all_cards)
-                # Normalize strength to [0, 1] range
-                # phevaluator returns lower values for better hands
-                normalized = 1.0 - (strength / 7462.0)  # 7462 = worst possible hand
-                bucket = int(normalized * (self.config.num_card_buckets - 1))
-                return min(bucket, self.config.num_card_buckets - 1)
+            # Update reach probabilities
+            new_reach_probs = reach_probs.at[player_id].multiply(strategy[action_idx])
+            
+            # Recursive call
+            key, subkey = jr.split(key)
+            action_values = action_values.at[action_idx].set(
+                self.cfr_recursive(new_state, player_id, new_reach_probs, subkey)
+            )
         
-        # Pre-flop: use simple hole card strength
-        hole_strength = self._preflop_strength(hole_cards)
-        bucket = int(hole_strength * (self.config.num_card_buckets - 1))
-        return min(bucket, self.config.num_card_buckets - 1)
+        # Calculate node value
+        node_value = jnp.dot(strategy, action_values)
+        
+        # Update regrets
+        if player_id == game_state.current_player:
+            regrets = action_values - node_value
+            opponent_reach = jnp.prod(reach_probs) / reach_probs[player_id]
+            
+            self.regret_sum[info_set] += regrets * opponent_reach
+            self.update_strategy(info_set, strategy)
+        
+        return node_value
     
-    def _preflop_strength(self, hole_cards: List[int]) -> float:
-        """Calculate preflop hand strength (0-1)."""
-        if len(hole_cards) != 2:
+    def get_utility(self, game_state: GameState, player_id: int) -> float:
+        """
+        Get utility for terminal game state
+        """
+        if game_state.winner == player_id:
+            return float(game_state.pot_size)
+        elif game_state.winner == -1:  # Tie
             return 0.0
-        
-        # Simple preflop evaluation
-        card1, card2 = hole_cards
-        rank1, rank2 = card1 // 4, card2 // 4
-        suit1, suit2 = card1 % 4, card2 % 4
-        
-        # Pocket pairs
-        if rank1 == rank2:
-            return 0.7 + (rank1 / 13.0) * 0.3
-        
-        # Suited connectors
-        if suit1 == suit2 and abs(rank1 - rank2) == 1:
-            return 0.5 + (max(rank1, rank2) / 13.0) * 0.2
-        
-        # High cards
-        high_card_strength = (rank1 + rank2) / 26.0
-        return high_card_strength * 0.6
+        else:
+            return -float(game_state.pot_size)
     
-    def get_info_state(self, state: GameState, player_id: int, hole_cards: jnp.ndarray) -> jnp.ndarray:
+    def apply_action(self, game_state: GameState, action_idx: int) -> GameState:
         """
-        Get information state for a player.
-        
-        Args:
-            state: Current game state
-            player_id: Player ID
-            hole_cards: Player's hole cards
-            
-        Returns:
-            Information state vector
+        Apply action to game state
         """
-        # Card abstraction
-        card_bucket = self.get_card_bucket(
-            hole_cards[player_id].tolist(),
-            state.community_cards.tolist()
-        )
+        action_name = self.actions[action_idx]
         
-        # Game state features
-        features = [
-            # Position information
-            player_id / self.config.num_players,
-            (player_id - state.button_position) / self.config.num_players,
-            
-            # Stack and pot information
-            state.players[player_id, 0] / self.config.starting_stack,  # Stack
-            state.pot / (self.config.starting_stack * self.config.num_players),  # Pot
-            state.current_bet / self.config.starting_stack,  # Current bet
-            
-            # Phase information
-            state.phase / 4.0,  # Normalize phase
-            
-            # Card abstraction
-            card_bucket / self.config.num_card_buckets,
-            
-            # Active players
-            jnp.sum(state.players[:, 2]) / self.config.num_players,
-        ]
+        if action_name == 'fold':
+            action = Action.FOLD
+        elif action_name == 'check_call':
+            action = Action.CHECK if game_state.current_bet == 0 else Action.CALL
+        else:  # bet_raise
+            action = Action.BET if game_state.current_bet == 0 else Action.RAISE
         
-        # Pad to fixed size
-        info_state = jnp.zeros(self.info_state_size)
-        info_state = info_state.at[:len(features)].set(jnp.array(features))
-        
-        return info_state
+        return self.engine.apply_action(game_state, action)
     
-    def get_action_mask(self, state: GameState, player_id: int) -> jnp.ndarray:
-        """Get mask of valid actions for a player."""
-        valid_actions = self.engine.get_valid_actions(state, player_id)
-        mask = jnp.zeros(self.action_space_size)
-        
-        for action in valid_actions:
-            if action.action_type == ActionType.FOLD:
-                mask = mask.at[0].set(1.0)
-            elif action.action_type == ActionType.CHECK:
-                mask = mask.at[1].set(1.0)
-            elif action.action_type == ActionType.CALL:
-                mask = mask.at[2].set(1.0)
-            elif action.action_type in [ActionType.BET, ActionType.RAISE]:
-                # Map bet sizes to action indices
-                bet_size = action.amount / state.pot
-                for i, size in enumerate(self.config.bet_sizes):
-                    if abs(bet_size - size) < 0.1:  # Allow some tolerance
-                        mask = mask.at[3 + i].set(1.0)
-                        break
-            elif action.action_type == ActionType.ALL_IN:
-                mask = mask.at[-1].set(1.0)
-        
-        return mask
-
-
-class MCCFRTrainer:
-    """
-    Monte Carlo Counterfactual Regret Minimization trainer.
-    
-    Uses CFRX for GPU-accelerated training of poker strategies.
-    """
-    
-    def __init__(self, config: TrainingConfig):
-        self.config = config
-        self.env = PokerEnvironment(config)
-        
-        # Initialize CFRX components
-        self.policy = TabularPolicy(
-            n_actions=self.env.action_space_size,
-            exploration_factor=0.6,
-            info_state_idx_fn=self._info_state_to_idx
-        )
-        
-        # Training metrics
-        self.training_history = []
-        self.iteration = 0
-        
-        # For evaluation
-        self.baseline_exploitability = float('inf')
-        
-        print(f"🚀 Initialized MCCFR trainer with {config.num_players} players")
-        print(f"📊 Action space size: {self.env.action_space_size}")
-        print(f"🎯 Target iterations: {config.num_iterations:,}")
-    
-    def _info_state_to_idx(self, info_state: jnp.ndarray) -> int:
-        """Convert information state to index for tabular policy."""
-        # Simple hash function for demonstration
-        # In production, would use better state abstraction
-        return hash(tuple(info_state.flatten())) % 1000000
-    
-    def train(self, save_path: str = "models/") -> Dict[str, Any]:
+    def train_iteration(self, iteration: int) -> float:
         """
-        Train the poker strategy using MCCFR.
-        
-        Args:
-            save_path: Directory to save trained models
-            
-        Returns:
-            Training results and metrics
+        Single training iteration
         """
-        os.makedirs(save_path, exist_ok=True)
+        total_utility = 0.0
         
-        print("🎯 Starting MCCFR training...")
-        
-        # Initialize training state
-        key = jax.random.PRNGKey(42)
-        
-        # Progress bar
-        pbar = tqdm(total=self.config.num_iterations, desc="Training")
-        
-        for iteration in range(self.config.num_iterations):
-            self.iteration = iteration
+        for _ in range(self.config.batch_size):
+            # Initialize game
+            game_state = self.engine.new_game()
             
-            # Run MCCFR iteration
-            metrics = self._run_iteration(key)
+            # Initialize reach probabilities
+            reach_probs = jnp.ones(self.config.players)
             
-            # Update progress
-            pbar.set_postfix({
-                'exploitability': f"{metrics.get('exploitability', 0):.4f}",
-                'avg_payoff': f"{metrics.get('avg_payoff', 0):.4f}"
-            })
-            pbar.update(1)
+            # CFR for each player
+            for player_id in range(self.config.players):
+                self.key, subkey = jr.split(self.key)
+                utility = self.cfr_recursive(game_state, player_id, reach_probs, subkey)
+                total_utility += utility
+        
+        return total_utility / self.config.batch_size
+    
+    def train(self, save_path: str = "models/mccfr_model.pkl"):
+        """
+        Main training loop
+        """
+        logger.info("Starting MCCFR training...")
+        
+        for iteration in tqdm(range(self.config.iterations), desc="Training"):
+            # Train iteration
+            avg_utility = self.train_iteration(iteration)
             
-            # Save and evaluate periodically
+            # Logging
+            if iteration % self.config.log_interval == 0:
+                logger.info(f"Iteration {iteration}: Average utility = {avg_utility:.4f}")
+            
+            # Save checkpoint
             if iteration % self.config.save_interval == 0:
-                self._save_checkpoint(save_path, iteration)
-            
-            if iteration % self.config.eval_interval == 0:
-                eval_metrics = self._evaluate_strategy()
-                metrics.update(eval_metrics)
-                
-                # Update key for next iteration
-                key = jax.random.split(key)[0]
-            
-            self.training_history.append(metrics)
-        
-        pbar.close()
+                self.save_model(save_path)
         
         # Final save
-        final_model_path = self._save_final_model(save_path)
-        
-        results = {
-            'training_history': self.training_history,
-            'final_model_path': final_model_path,
-            'config': self.config,
-            'final_metrics': self.training_history[-1] if self.training_history else {}
-        }
-        
-        print(f"✅ Training completed!")
-        print(f"📁 Model saved to: {final_model_path}")
-        
-        return results
+        self.save_model(save_path)
+        logger.info(f"Training completed. Model saved to {save_path}")
     
-    def _run_iteration(self, key: jax.random.PRNGKey) -> Dict[str, float]:
-        """Run one MCCFR iteration."""
-        # For now, use simplified training loop
-        # In production, would integrate with actual CFRX trainer
-        
-        # Sample game scenarios
-        total_payoff = 0.0
-        num_games = self.config.batch_size
-        
-        for _ in range(num_games):
-            # Simulate a game
-            payoff = self._simulate_game(key)
-            total_payoff += payoff
-            
-            # Update key
-            key = jax.random.split(key)[0]
-        
-        avg_payoff = total_payoff / num_games
-        
-        # Calculate exploitability (simplified)
-        exploitability = max(0.0, self.baseline_exploitability - avg_payoff)
-        
-        return {
-            'avg_payoff': avg_payoff,
-            'exploitability': exploitability,
-            'iteration': self.iteration
-        }
-    
-    def _simulate_game(self, key: jax.random.PRNGKey) -> float:
-        """Simulate one poker game for training."""
-        # Initialize game
-        stacks = [self.config.starting_stack] * self.config.num_players
-        state = self.env.engine.new_game(stacks)
-        
-        # Deal hole cards
-        hole_cards = jax.random.choice(
-            key, 52, shape=(self.config.num_players, 2), replace=False
-        )
-        
-        # Play game
-        payoffs = [0.0] * self.config.num_players
-        
-        while not self.env.engine.is_game_over(state):
-            current_player = state.active_player
-            
-            # Get valid actions
-            valid_actions = self.env.engine.get_valid_actions(state, current_player)
-            
-            if valid_actions:
-                # Choose action using policy
-                info_state = self.env.get_info_state(state, current_player, hole_cards)
-                action_probs = self._get_action_probabilities(info_state)
-                
-                # Sample action
-                action_idx = jax.random.choice(key, len(valid_actions), p=action_probs[:len(valid_actions)])
-                chosen_action = valid_actions[action_idx]
-                
-                # Process action
-                state = self.env.engine.process_action(state, chosen_action)
-            else:
-                # No valid actions, advance phase
-                state = self.env.engine.advance_phase(state)
-        
-        # Calculate final payoffs
-        if state.phase == GamePhase.SHOWDOWN.value:
-            winners, final_payoffs = self.env.engine.evaluate_showdown(state, hole_cards)
-            payoffs = final_payoffs
-        
-        # Return payoff for player 0 (training perspective)
-        return payoffs[0]
-    
-    def _get_action_probabilities(self, info_state: jnp.ndarray) -> jnp.ndarray:
-        """Get action probabilities from policy."""
-        # Simplified policy for demonstration
-        # In production, would use actual CFRX policy
-        uniform_probs = jnp.ones(self.env.action_space_size) / self.env.action_space_size
-        return uniform_probs
-    
-    def _evaluate_strategy(self) -> Dict[str, float]:
-        """Evaluate current strategy."""
-        # Simplified evaluation
-        # In production, would use proper exploitability calculation
-        return {
-            'eval_exploitability': np.random.uniform(0.0, 0.1),
-            'eval_win_rate': np.random.uniform(0.45, 0.55)
-        }
-    
-    def _save_checkpoint(self, save_path: str, iteration: int):
-        """Save training checkpoint."""
-        checkpoint_path = os.path.join(save_path, f"checkpoint_{iteration}.pkl")
-        
-        checkpoint = {
-            'iteration': iteration,
-            'policy_state': self.policy,
-            'training_history': self.training_history,
+    def save_model(self, path: str):
+        """
+        Save trained model
+        """
+        model_data = {
+            'strategy_sum': self.strategy_sum,
+            'regret_sum': self.regret_sum,
             'config': self.config
         }
         
-        with open(checkpoint_path, 'wb') as f:
-            pickle.dump(checkpoint, f)
-        
-        print(f"💾 Checkpoint saved: {checkpoint_path}")
+        with open(path, 'wb') as f:
+            pickle.dump(model_data, f)
     
-    def _save_final_model(self, save_path: str) -> str:
-        """Save final trained model."""
-        model_path = os.path.join(save_path, "final_model.pkl")
+    def load_model(self, path: str):
+        """
+        Load trained model
+        """
+        with open(path, 'rb') as f:
+            model_data = pickle.load(f)
         
-        model = {
-            'policy': self.policy,
-            'config': self.config,
-            'training_history': self.training_history,
-            'env': self.env
+        self.strategy_sum = model_data['strategy_sum']
+        self.regret_sum = model_data['regret_sum']
+        self.config = model_data['config']
+    
+    def get_action_probabilities(self, game_state: GameState, player_id: int) -> Dict[str, float]:
+        """
+        Get action probabilities for given game state
+        """
+        info_set = self.get_information_set(game_state, player_id)
+        strategy = self.get_strategy(info_set)
+        
+        return {
+            action: float(prob) 
+            for action, prob in zip(self.actions, strategy)
         }
-        
-        with open(model_path, 'wb') as f:
-            pickle.dump(model, f)
-        
-        return model_path
-    
-    def load_checkpoint(self, checkpoint_path: str):
-        """Load training checkpoint."""
-        with open(checkpoint_path, 'rb') as f:
-            checkpoint = pickle.load(f)
-        
-        self.iteration = checkpoint['iteration']
-        self.policy = checkpoint['policy_state']
-        self.training_history = checkpoint['training_history']
-        
-        print(f"📂 Loaded checkpoint from iteration {self.iteration}")
 
-
-def test_trainer():
-    """Test the MCCFR trainer."""
-    config = TrainingConfig(
-        num_iterations=1000,
-        batch_size=32,
-        num_players=2,
-        eval_interval=100,
-        save_interval=500
+# Factory function for CLI
+def create_trainer(iterations: int = 100000, batch_size: int = 1024, 
+                  players: int = 2, **kwargs) -> SimpleMCCFRTrainer:
+    """
+    Create MCCFR trainer with specified configuration
+    """
+    config = MCCFRConfig(
+        iterations=iterations,
+        batch_size=batch_size,
+        players=players,
+        **kwargs
     )
-    
-    trainer = MCCFRTrainer(config)
-    
-    # Run short training
-    results = trainer.train("test_models/")
-    
-    print("Training results:")
-    print(f"Final exploitability: {results['final_metrics'].get('exploitability', 'N/A')}")
-    print(f"Model path: {results['final_model_path']}")
-    
-    return trainer, results
-
-
-if __name__ == "__main__":
-    test_trainer() 
+    return SimpleMCCFRTrainer(config) 
