@@ -70,7 +70,24 @@ class GameState(NamedTuple):
     
     def is_terminal(self) -> bool:
         """Check if game is in terminal state"""
-        return self.winner != -1 or self.phase >= 4
+        # Game is terminal if we have a winner
+        if self.winner != -1:
+            return True
+        
+        # Game is terminal if we've reached showdown phase (phase 4+)
+        if self.phase >= 4:
+            return True
+            
+        # Game is terminal if only one or zero players are active
+        active_count = 0
+        for i in range(len(self.players)):
+            if self.players[i, 2] > 0:  # is_active flag
+                active_count += 1
+        
+        if active_count <= 1:
+            return True
+            
+        return False
 
 
 class PokerEngine:
@@ -317,37 +334,102 @@ class PokerEngine:
     
     def _is_betting_round_complete(self, state: GameState, next_player: int) -> bool:
         """Check if betting round is complete"""
-        # Simple check: if we're back to the first player who bet
         active_players = [i for i in range(self.config.players) if self.is_player_active(state, i)]
-        return len(active_players) <= 1
+        
+        # If only one or zero players active, round is complete
+        if len(active_players) <= 1:
+            return True
+        
+        # Check if all active players have matched the current bet
+        all_bets_equal = True
+        max_bet = 0.0
+        
+        for player_id in active_players:
+            player_bet = state.players[player_id, 1]
+            max_bet = max(max_bet, player_bet)
+        
+        for player_id in active_players:
+            player_bet = state.players[player_id, 1]
+            player_stack = state.players[player_id, 0]
+            is_all_in = state.players[player_id, 3] > 0
+            
+            # Player must either match max bet or be all-in
+            if not is_all_in and player_bet < max_bet and player_stack > 0:
+                all_bets_equal = False
+                break
+        
+        # If all bets are equal and everyone has had a chance to act, round is complete
+        if all_bets_equal:
+            # Additional check: if everyone just checked and there are no more actions needed
+            if state.current_bet == 0 and len(state.betting_history) >= len(active_players):
+                return True
+            # Or if everyone has called/matched the current bet
+            elif state.current_bet > 0 and all_bets_equal:
+                return True
+        
+        # Special case: if we've had too many consecutive checks, force end round
+        recent_actions = state.betting_history[-10:]
+        consecutive_checks = 0
+        for action in reversed(recent_actions):
+            if action == 'check':
+                consecutive_checks += 1
+            else:
+                break
+        
+        # If we have more checks than active players, something is wrong - end round
+        if consecutive_checks >= len(active_players) * 2:
+            return True
+        
+        return False
     
     def _advance_phase(self, state: GameState) -> GameState:
         """Advance to next phase of the game"""
         new_phase = state.phase + 1
         
-        if new_phase >= 4:  # Showdown
-            # Determine winner
-            winner = self._determine_winner(state)
-            return state._replace(phase=new_phase, winner=winner)
+        # Check for showdown or game end
+        active_players = [i for i in range(self.config.players) if self.is_player_active(state, i)]
         
-        # Deal community cards
-        cards_to_deal = [3, 1, 1][new_phase - 1]  # Flop: 3, Turn: 1, River: 1
+        if len(active_players) <= 1:
+            # Only one player left - they win
+            winner = active_players[0] if active_players else 0
+            return state._replace(phase=4, winner=winner)  # Game over
+        
+        if new_phase >= 4:  # Showdown phase
+            # Determine winner at showdown
+            winner = self._determine_winner(state)
+            return state._replace(phase=4, winner=winner)
+        
+        # Deal community cards for new phase
         new_community_cards = state.community_cards
         
-        for i in range(cards_to_deal):
-            card_idx = new_phase * 3 + i if new_phase == 1 else 3 + (new_phase - 1) + i
-            if card_idx < 5:
-                new_community_cards = new_community_cards.at[card_idx].set(state.deck[card_idx])
+        if new_phase == 1:  # Flop - deal 3 cards
+            for i in range(3):
+                if i < len(state.deck):
+                    new_community_cards = new_community_cards.at[i].set(state.deck[i])
+        elif new_phase == 2:  # Turn - deal 1 card
+            if 3 < len(state.deck):
+                new_community_cards = new_community_cards.at[3].set(state.deck[3])
+        elif new_phase == 3:  # River - deal 1 card
+            if 4 < len(state.deck):
+                new_community_cards = new_community_cards.at[4].set(state.deck[4])
         
-        # Reset current bet and find first active player
+        # Reset betting for new phase
+        # Clear all player bets (keep them in pot)
+        new_players = state.players
+        for i in range(self.config.players):
+            if self.is_player_active(state, i):
+                new_players = new_players.at[i, 1].set(0.0)  # Reset current bet to 0
+        
+        # Find first active player after button for new betting round
         first_player = self._first_active_player_after_button(state)
         
         return state._replace(
             phase=new_phase,
             community_cards=new_community_cards,
-            current_bet=0.0,
+            players=new_players,
+            current_bet=0.0,  # Reset current bet for new round
             current_player=first_player,
-            betting_history=[]
+            betting_history=[]  # Clear betting history for new round
         )
     
     def _first_active_player_after_button(self, state: GameState) -> int:
@@ -360,11 +442,18 @@ class PokerEngine:
     
     def _determine_winner(self, state: GameState) -> int:
         """Determine winner at showdown"""
-        # Simple winner determination (first active player wins)
-        for i in range(self.config.players):
-            if self.is_player_active(state, i):
-                return i
-        return 0
+        active_players = [i for i in range(self.config.players) if self.is_player_active(state, i)]
+        
+        if not active_players:
+            return 0  # Default to player 0 if no active players
+        
+        if len(active_players) == 1:
+            return active_players[0]  # Last player standing wins
+        
+        # For simplicity in training, use a deterministic winner based on player position
+        # In a real implementation, this would evaluate hand strength
+        # For now, use the player with the lowest ID among active players
+        return min(active_players)
     
     def is_player_active(self, state: GameState, player_id: int) -> bool:
         """Check if player is active"""
