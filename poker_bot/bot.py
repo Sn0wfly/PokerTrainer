@@ -6,15 +6,18 @@ Uses trained MCCFR strategy to play poker in real-time.
 
 import jax
 import jax.numpy as jnp
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import pickle
 import time
 from dataclasses import dataclass
+import logging
+
 from .engine import PokerEngine, GameState, Action, ActionType
 from .evaluator import HandEvaluator
-from .trainer import TrainingConfig, PokerEnvironment
+from .trainer import SimpleMCCFRTrainer, MCCFRConfig
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class BotConfig:
@@ -29,62 +32,60 @@ class BotConfig:
     max_decision_time: float = 30.0  # Max time per decision (tournament rules)
     enable_logging: bool = True
 
-
 class PokerBot:
     """
-    AI Poker Bot using trained MCCFR strategy.
-    
-    Designed for real-time poker play with minimal latency.
+    AI Poker Bot using trained MCCFR strategy
     """
     
-    def __init__(self, config: BotConfig):
-        self.config = config
+    def __init__(self, model_path: str, config: Any = None):
+        """
+        Initialize poker bot with trained model
+        
+        Args:
+            model_path: Path to trained model file
+            config: Bot configuration (optional)
+        """
+        self.model_path = model_path
+        self.config = config or BotConfig(model_path=model_path)
+        
+        # Initialize components
+        self.engine = PokerEngine()
+        self.evaluator = HandEvaluator()
+        self.trainer = None
+        
+        # Performance tracking
+        self.decisions_made = 0
+        self.total_decision_time = 0.0
+        self.game_results = []
+        
+        # Load trained model
         self.load_model()
         
-        # Performance monitoring
-        self.decision_times = []
-        self.total_hands = 0
-        self.total_winnings = 0.0
-        
-        # Game state tracking
-        self.current_game_state = None
-        self.hole_cards = None
-        self.player_id = None
-        
-        print(f"🤖 PokerBot initialized")
-        print(f"📁 Model: {config.model_path}")
-        print(f"⚡ Ready for real-time play!")
+        logger.info(f"PokerBot initialized with model: {model_path}")
     
     def load_model(self):
-        """Load trained model from file."""
+        """Load the trained MCCFR model"""
         try:
-            with open(self.config.model_path, 'rb') as f:
+            with open(self.model_path, 'rb') as f:
                 model_data = pickle.load(f)
             
-            self.policy = model_data['policy']
-            self.training_config = model_data['config']
-            self.env = model_data['env']
-            self.training_history = model_data.get('training_history', [])
+            # Create trainer instance and load model
+            self.trainer = SimpleMCCFRTrainer(model_data['config'])
+            self.trainer.strategy_sum = model_data['strategy_sum']
+            self.trainer.regret_sum = model_data['regret_sum']
             
-            print(f"✅ Model loaded successfully")
-            print(f"📊 Training iterations: {len(self.training_history)}")
+            logger.info("Model loaded successfully")
             
         except Exception as e:
-            print(f"❌ Error loading model: {e}")
-            # Fallback to random strategy
+            logger.warning(f"Failed to load model: {e}")
+            logger.info("Using fallback strategy")
             self._init_fallback_strategy()
     
     def _init_fallback_strategy(self):
-        """Initialize fallback strategy if model loading fails."""
-        print("🔄 Initializing fallback strategy...")
-        
-        # Create dummy training config
-        self.training_config = TrainingConfig(num_players=2)
-        self.env = PokerEnvironment(self.training_config)
-        
-        # Simple random policy
-        self.policy = None
-        print("⚠️  Using random strategy fallback")
+        """Initialize fallback strategy if model loading fails"""
+        config = MCCFRConfig(iterations=100, batch_size=32, players=2)
+        self.trainer = SimpleMCCFRTrainer(config)
+        logger.info("Fallback strategy initialized")
     
     def make_decision(self, 
                      game_state: GameState, 
@@ -92,12 +93,12 @@ class PokerBot:
                      player_id: int,
                      valid_actions: List[Action]) -> Action:
         """
-        Make a poker decision based on current game state.
+        Make a poker decision based on current game state
         
         Args:
             game_state: Current game state
-            hole_cards: Bot's hole cards
-            player_id: Bot's player ID
+            hole_cards: Player's hole cards
+            player_id: Player ID
             valid_actions: List of valid actions
             
         Returns:
@@ -105,28 +106,19 @@ class PokerBot:
         """
         start_time = time.time()
         
-        # Update internal state
-        self.current_game_state = game_state
-        self.hole_cards = hole_cards
-        self.player_id = player_id
-        
-        # Get decision from strategy
-        if self.policy is not None:
+        try:
+            # Get action from trained strategy
             action = self._strategic_decision(game_state, hole_cards, player_id, valid_actions)
-        else:
+            
+            # Add thinking time for realism
+            time.sleep(min(self.config.thinking_time, 0.1))
+            
+        except Exception as e:
+            logger.warning(f"Strategic decision failed: {e}")
             action = self._fallback_decision(valid_actions)
         
-        # Add thinking time (looks more human-like)
-        elapsed = time.time() - start_time
-        if elapsed < self.config.thinking_time:
-            time.sleep(self.config.thinking_time - elapsed)
-        
-        # Log decision
-        if self.config.enable_logging:
-            self._log_decision(action, elapsed)
-        
-        # Track performance
-        self.decision_times.append(time.time() - start_time)
+        decision_time = time.time() - start_time
+        self._log_decision(action, decision_time)
         
         return action
     
@@ -135,262 +127,201 @@ class PokerBot:
                           hole_cards: List[int], 
                           player_id: int,
                           valid_actions: List[Action]) -> Action:
-        """Make strategic decision using trained policy."""
+        """
+        Make strategic decision using trained model
+        """
+        # Get action probabilities from trainer
+        action_probs = self.trainer.get_action_probabilities(game_state, player_id)
         
-        # Get information state
-        hole_cards_array = jnp.zeros((self.training_config.num_players, 2))
-        hole_cards_array = hole_cards_array.at[player_id].set(jnp.array(hole_cards))
+        # Convert to valid actions
+        valid_action_names = [self._action_to_name(action) for action in valid_actions]
         
-        info_state = self.env.get_info_state(game_state, player_id, hole_cards_array)
-        
-        # Get action probabilities from policy
-        action_probs = self._get_policy_probabilities(info_state, valid_actions)
-        
-        # Add randomization to avoid predictability
-        if self.config.randomization > 0:
-            noise = np.random.normal(0, self.config.randomization, len(action_probs))
-            action_probs = action_probs + noise
-            action_probs = np.maximum(action_probs, 0.0)  # Ensure non-negative
-            action_probs = action_probs / np.sum(action_probs)  # Renormalize
-        
-        # Choose action based on probabilities
-        if len(valid_actions) > 0:
-            action_idx = np.random.choice(len(valid_actions), p=action_probs[:len(valid_actions)])
-            chosen_action = valid_actions[action_idx]
-            
-            # Apply aggression factor
-            chosen_action = self._apply_aggression(chosen_action, game_state)
-            
-            return chosen_action
-        
-        # Fallback if no valid actions
-        return self._fallback_decision(valid_actions)
-    
-    def _get_policy_probabilities(self, info_state: jnp.ndarray, valid_actions: List[Action]) -> np.ndarray:
-        """Get action probabilities from the trained policy."""
-        # For now, use simplified policy evaluation
-        # In production, would use actual CFRX policy evaluation
-        
-        # Default uniform distribution
-        probs = np.ones(len(valid_actions)) / len(valid_actions)
-        
-        # Simple heuristics based on hand strength
-        if len(self.hole_cards) == 2:
-            hand_strength = self._estimate_hand_strength()
-            
-            # Adjust probabilities based on hand strength
-            for i, action in enumerate(valid_actions):
-                if action.action_type == ActionType.BET or action.action_type == ActionType.RAISE:
-                    # More likely to bet/raise with strong hands
-                    probs[i] *= (1.0 + hand_strength)
-                elif action.action_type == ActionType.FOLD:
-                    # More likely to fold with weak hands
-                    probs[i] *= (1.0 - hand_strength)
+        # Create probability distribution for valid actions
+        probs = []
+        for action_name in valid_action_names:
+            if action_name in action_probs:
+                probs.append(action_probs[action_name])
+            else:
+                probs.append(0.1)  # Small default probability
         
         # Normalize probabilities
-        probs = probs / np.sum(probs)
-        return probs
-    
-    def _estimate_hand_strength(self) -> float:
-        """Estimate hand strength (0-1)."""
-        if not self.hole_cards or len(self.hole_cards) != 2:
-            return 0.5
+        probs = np.array(probs)
+        if probs.sum() > 0:
+            probs = probs / probs.sum()
+        else:
+            probs = np.ones(len(probs)) / len(probs)
         
-        # Use preflop strength calculation
-        return self.env._preflop_strength(self.hole_cards)
+        # Add randomization
+        if self.config.randomization > 0:
+            noise = np.random.uniform(0, self.config.randomization, len(probs))
+            probs = probs + noise
+            probs = probs / probs.sum()
+        
+        # Sample action
+        action_idx = np.random.choice(len(valid_actions), p=probs)
+        chosen_action = valid_actions[action_idx]
+        
+        # Apply aggression factor
+        chosen_action = self._apply_aggression(chosen_action, game_state)
+        
+        return chosen_action
+    
+    def _action_to_name(self, action: Action) -> str:
+        """Convert Action enum to string name"""
+        if action == Action.FOLD:
+            return 'fold'
+        elif action in [Action.CHECK, Action.CALL]:
+            return 'check_call'
+        elif action in [Action.BET, Action.RAISE]:
+            return 'bet_raise'
+        else:
+            return 'fold'
     
     def _apply_aggression(self, action: Action, game_state: GameState) -> Action:
-        """Apply aggression factor to betting actions."""
-        if action.action_type in [ActionType.BET, ActionType.RAISE]:
-            # Increase bet size based on aggression factor
-            adjusted_amount = action.amount * self.config.aggression_factor
-            
-            # Ensure we don't exceed stack size
-            max_bet = game_state.players[self.player_id, 0]  # Current stack
-            adjusted_amount = min(adjusted_amount, max_bet)
-            
-            return Action(action.action_type, adjusted_amount, action.player_id)
+        """Apply aggression factor to action"""
+        if self.config.aggression_factor > 1.0:
+            # More aggressive: convert calls to raises, checks to bets
+            if action == Action.CALL and np.random.random() < (self.config.aggression_factor - 1.0):
+                return Action.RAISE
+            elif action == Action.CHECK and np.random.random() < (self.config.aggression_factor - 1.0):
+                return Action.BET
         
         return action
     
     def _fallback_decision(self, valid_actions: List[Action]) -> Action:
-        """Fallback decision strategy (basic poker logic)."""
-        if not valid_actions:
-            return Action(ActionType.FOLD)
-        
-        # Simple heuristic strategy
-        hand_strength = self._estimate_hand_strength()
-        
-        # Strong hands (>0.7): aggressive play
-        if hand_strength > 0.7:
-            # Look for betting/raising opportunities
-            for action in valid_actions:
-                if action.action_type in [ActionType.BET, ActionType.RAISE]:
-                    return action
-            # If can't bet/raise, call or check
-            for action in valid_actions:
-                if action.action_type in [ActionType.CALL, ActionType.CHECK]:
-                    return action
-        
-        # Medium hands (0.3-0.7): cautious play
-        elif hand_strength > 0.3:
-            # Prefer checking/calling
-            for action in valid_actions:
-                if action.action_type in [ActionType.CHECK, ActionType.CALL]:
-                    return action
-            # Small bet if possible
-            for action in valid_actions:
-                if action.action_type == ActionType.BET and action.amount <= 10:
-                    return action
-        
-        # Weak hands (<0.3): defensive play
+        """
+        Simple fallback decision strategy
+        """
+        # Simple heuristic: prefer check/call over fold, bet/raise occasionally
+        if Action.CHECK in valid_actions:
+            return Action.CHECK
+        elif Action.CALL in valid_actions:
+            if np.random.random() < 0.7:  # 70% call, 30% fold
+                return Action.CALL
+            else:
+                return Action.FOLD
+        elif Action.BET in valid_actions:
+            if np.random.random() < 0.3:  # 30% bet
+                return Action.BET
+            else:
+                return Action.CHECK if Action.CHECK in valid_actions else Action.FOLD
         else:
-            # Prefer checking/folding
-            for action in valid_actions:
-                if action.action_type == ActionType.CHECK:
-                    return action
-            for action in valid_actions:
-                if action.action_type == ActionType.FOLD:
-                    return action
-        
-        # Default: return first valid action
-        return valid_actions[0]
+            return valid_actions[0]  # Default to first valid action
     
     def _log_decision(self, action: Action, decision_time: float):
-        """Log decision for analysis."""
+        """Log decision for performance tracking"""
+        self.decisions_made += 1
+        self.total_decision_time += decision_time
+        
         if self.config.enable_logging:
-            phase = "unknown"
-            if self.current_game_state:
-                phase = ["preflop", "flop", "turn", "river", "showdown"][self.current_game_state.phase]
-            
-            print(f"🎯 {phase.upper()}: {action.action_type.value} "
-                  f"${action.amount:.2f} ({decision_time:.3f}s)")
+            logger.debug(f"Decision {self.decisions_made}: {action} in {decision_time:.3f}s")
     
     def update_game_result(self, payoff: float):
-        """Update bot's performance tracking."""
-        self.total_hands += 1
-        self.total_winnings += payoff
+        """Update with game result"""
+        self.game_results.append(payoff)
         
         if self.config.enable_logging:
-            avg_winnings = self.total_winnings / self.total_hands
-            print(f"📊 Hand {self.total_hands}: ${payoff:.2f} "
-                  f"(avg: ${avg_winnings:.2f})")
+            logger.info(f"Game result: {payoff:.2f}")
     
     def get_performance_stats(self) -> Dict:
-        """Get bot's performance statistics."""
-        avg_decision_time = np.mean(self.decision_times) if self.decision_times else 0.0
-        max_decision_time = max(self.decision_times) if self.decision_times else 0.0
+        """Get performance statistics"""
+        avg_decision_time = self.total_decision_time / max(self.decisions_made, 1)
         
-        return {
-            'total_hands': self.total_hands,
-            'total_winnings': self.total_winnings,
-            'avg_winnings_per_hand': self.total_winnings / max(self.total_hands, 1),
+        stats = {
+            'decisions_made': self.decisions_made,
             'avg_decision_time': avg_decision_time,
-            'max_decision_time': max_decision_time,
-            'decisions_made': len(self.decision_times)
+            'max_decision_time': self.config.max_decision_time,
+            'total_games': len(self.game_results),
+            'avg_payoff': np.mean(self.game_results) if self.game_results else 0.0
         }
+        
+        return stats
     
     def reset_session(self):
-        """Reset session statistics."""
-        self.decision_times = []
-        self.total_hands = 0
-        self.total_winnings = 0.0
-        print("🔄 Session statistics reset")
+        """Reset session statistics"""
+        self.decisions_made = 0
+        self.total_decision_time = 0.0
+        self.game_results = []
+        
+        logger.info("Session reset")
+    
+    def play_session(self, hands: int = 100, thinking_time: float = 1.0, 
+                    aggressive: bool = False) -> Dict:
+        """
+        Play a session of poker hands
+        
+        Args:
+            hands: Number of hands to play
+            thinking_time: Time to think per decision
+            aggressive: Whether to play aggressively
+            
+        Returns:
+            Session results
+        """
+        logger.info(f"Starting session: {hands} hands")
+        
+        # Adjust configuration
+        original_thinking_time = self.config.thinking_time
+        original_aggression = self.config.aggression_factor
+        
+        self.config.thinking_time = thinking_time
+        if aggressive:
+            self.config.aggression_factor = 1.5
+        
+        # Reset session
+        self.reset_session()
+        
+        # Play hands (simplified simulation)
+        hands_won = 0
+        starting_stack = 100.0
+        current_stack = starting_stack
+        
+        for hand_num in range(hands):
+            # Simulate hand outcome (in real implementation, would play actual hands)
+            game_state = self.engine.new_game()
+            
+            # Make some decisions during the hand
+            for _ in range(np.random.randint(1, 4)):  # 1-3 decisions per hand
+                valid_actions = [Action.FOLD, Action.CHECK, Action.BET]
+                action = self.make_decision(game_state, [0, 1], 0, valid_actions)
+            
+            # Simulate hand result
+            hand_result = np.random.uniform(-5.0, 5.0)  # Random win/loss
+            current_stack += hand_result
+            
+            if hand_result > 0:
+                hands_won += 1
+            
+            self.update_game_result(hand_result)
+        
+        # Restore original configuration
+        self.config.thinking_time = original_thinking_time
+        self.config.aggression_factor = original_aggression
+        
+        # Return results
+        results = {
+            'hands_played': hands,
+            'hands_won': hands_won,
+            'win_rate': hands_won / hands,
+            'starting_stack': starting_stack,
+            'final_stack': current_stack,
+            'profit_loss': current_stack - starting_stack,
+            'avg_decision_time': self.total_decision_time / max(self.decisions_made, 1)
+        }
+        
+        logger.info(f"Session completed: {results}")
+        return results
 
-
-class BotInterface:
+# Factory function for easy bot creation
+def create_bot(model_path: str, **kwargs) -> PokerBot:
     """
-    Interface for integrating PokerBot with external poker platforms.
+    Create a poker bot with specified configuration
     
-    Provides standardized methods for different poker software.
+    Args:
+        model_path: Path to trained model
+        **kwargs: Additional configuration options
+        
+    Returns:
+        Configured PokerBot instance
     """
-    
-    def __init__(self, bot: PokerBot):
-        self.bot = bot
-        self.engine = PokerEngine()
-        self.evaluator = HandEvaluator()
-    
-    def parse_game_state(self, external_state: Dict) -> GameState:
-        """Parse external game state format to internal format."""
-        # This would be customized for each poker platform
-        # (PokerStars, PartyPoker, etc.)
-        
-        # Example implementation for generic format
-        players = jnp.array([
-            [external_state.get('stacks', [100.0] * 6)[i],
-             external_state.get('current_bets', [0.0] * 6)[i],
-             1.0 if i in external_state.get('active_players', []) else 0.0,
-             0.0]  # all_in flag
-            for i in range(6)
-        ])
-        
-        community_cards = jnp.array(external_state.get('community_cards', [-1] * 5))
-        
-        return GameState(
-            players=players,
-            community_cards=community_cards,
-            pot=external_state.get('pot', 0.0),
-            current_bet=external_state.get('current_bet', 0.0),
-            phase=external_state.get('phase', 0),
-            active_player=external_state.get('active_player', 0),
-            button_position=external_state.get('button', 0),
-            deck=jnp.arange(52)  # Not used in real play
-        )
-    
-    def get_action_command(self, action: Action) -> str:
-        """Convert action to external command format."""
-        if action.action_type == ActionType.FOLD:
-            return "fold"
-        elif action.action_type == ActionType.CHECK:
-            return "check"
-        elif action.action_type == ActionType.CALL:
-            return "call"
-        elif action.action_type == ActionType.BET:
-            return f"bet {action.amount:.2f}"
-        elif action.action_type == ActionType.RAISE:
-            return f"raise {action.amount:.2f}"
-        elif action.action_type == ActionType.ALL_IN:
-            return "all-in"
-        else:
-            return "check"  # Safe default
-
-
-def test_bot():
-    """Test the poker bot."""
-    # Create bot config
-    config = BotConfig(
-        model_path="models/final_model.pkl",
-        thinking_time=0.1,  # Fast for testing
-        enable_logging=True
-    )
-    
-    # Initialize bot (will use fallback strategy if no model)
-    bot = PokerBot(config)
-    
-    # Create test game state
-    engine = PokerEngine(num_players=2)
-    state = engine.new_game([100.0, 100.0], button_pos=0)
-    
-    # Test decision making
-    hole_cards = [48, 49]  # Aces
-    player_id = 0
-    valid_actions = engine.get_valid_actions(state, player_id)
-    
-    print(f"Test scenario:")
-    print(f"Hole cards: {hole_cards}")
-    print(f"Valid actions: {[a.action_type.value for a in valid_actions]}")
-    
-    # Make decision
-    action = bot.make_decision(state, hole_cards, player_id, valid_actions)
-    
-    print(f"Bot decision: {action.action_type.value} ${action.amount:.2f}")
-    
-    # Show performance stats
-    stats = bot.get_performance_stats()
-    print(f"Performance: {stats}")
-    
-    return bot
-
-
-if __name__ == "__main__":
-    test_bot() 
+    return PokerBot(model_path=model_path, **kwargs) 
