@@ -195,15 +195,21 @@ def train_fast(iterations: int, batch_size: int, algorithm: str, save_interval: 
             # Training step
             if algorithm == 'parallel':
                 # Use parallel training
-                result = trainer.training_step(test_info_state, test_regret, test_strategy)
+                result = trainer.distributed_training_step(test_regret, test_regret, learning_rate)
             else:
                 # Use advanced CFR algorithm
                 result = trainer.training_step(test_info_state, test_regret, test_strategy)
             
             # Update training data
             info_set_key = f"player_{test_info_state.player_id}_round_{test_info_state.round}"
-            training_data['strategy_sum'][info_set_key] = result.get('strategy', test_strategy)
-            training_data['regret_sum'][info_set_key] = result.get('regret', test_regret)
+            if algorithm == 'parallel':
+                # Handle parallel training results
+                training_data['strategy_sum'][info_set_key] = result.get('strategies', test_strategy)
+                training_data['regret_sum'][info_set_key] = result.get('q_values', test_regret)
+            else:
+                # Handle advanced CFR algorithm results
+                training_data['strategy_sum'][info_set_key] = result.get('strategy', test_strategy)
+                training_data['regret_sum'][info_set_key] = result.get('regret', test_regret)
             training_data['iteration'] = iteration
             
             # Log progress
