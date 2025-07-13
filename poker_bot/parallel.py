@@ -161,7 +161,7 @@ class GradientCheckpointManager:
             # Checkpoint based on memory usage
             def adaptive_checkpoint(*args, **kwargs):
                 memory_usage = get_memory_usage()
-                if memory_usage['percent'] > 80:  # High memory usage
+                if memory_usage['system_memory_percent'] > 80:  # High memory usage
                     return checkpoint(func)(*args, **kwargs)
                 else:
                     return func(*args, **kwargs)
@@ -299,7 +299,7 @@ class DistributedCFRCoordinator:
             'avg_step_time': avg_step_time,
             'throughput_steps_per_sec': throughput,
             'parallel_efficiency': (1.0 / avg_step_time) / self.config.num_devices,
-            'memory_peak_mb': get_memory_usage()['process_mb']
+            'memory_peak_mb': get_memory_usage()['process_memory_mb']
         }
         
         logger.info(f"Benchmark results: {benchmark_results}")

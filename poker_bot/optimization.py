@@ -422,7 +422,7 @@ class OptimizedCFRTrainer:
             
             # Memory management
             current_memory = get_memory_usage()
-            if current_memory['percent'] > self.config.cache_cleanup_threshold * 100:
+            if current_memory['system_memory_percent'] > self.config.cache_cleanup_threshold * 100:
                 self.smart_cache._cleanup_cache()
         
         step_time = self.profiler.end_timer("training_step")
@@ -433,7 +433,7 @@ class OptimizedCFRTrainer:
             'q_update_time': q_update_time,
             'loss': loss,
             'learning_rate': learning_rate,
-            'memory_usage': current_memory['percent']
+            'memory_usage': current_memory['system_memory_percent']
         }
         
         self.profiler.profile_step(step_data)
@@ -504,15 +504,15 @@ def get_optimal_optimization_config() -> OptimizationConfig:
     memory_info = get_memory_usage()
     
     # Calculate gradient accumulation steps based on memory
-    if memory_info['available_gb'] > 16:
+    if memory_info['available_memory_gb'] > 16:
         gradient_accumulation_steps = 4
-    elif memory_info['available_gb'] > 8:
+    elif memory_info['available_memory_gb'] > 8:
         gradient_accumulation_steps = 8
     else:
         gradient_accumulation_steps = 16
     
     # Cache size based on available memory
-    cache_size = min(2000, int(memory_info['available_gb'] * 50))
+    cache_size = min(2000, int(memory_info['available_memory_gb'] * 50))
     
     config = OptimizationConfig(
         gradient_accumulation_steps=gradient_accumulation_steps,

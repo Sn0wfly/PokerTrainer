@@ -343,7 +343,7 @@ class AdaptiveBatchManager:
         if memory_usage is None:
             memory_usage = get_memory_usage()
         
-        memory_percent = memory_usage['percent'] / 100.0
+        memory_percent = memory_usage['system_memory_percent'] / 100.0
         self.memory_history.append(memory_percent)
         
         # Keep only recent memory history
