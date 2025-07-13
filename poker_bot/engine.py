@@ -37,11 +37,11 @@ class GamePhase(Enum):
 @dataclass
 class GameConfig:
     """Configuration for poker game."""
-    players: int = 2
+    players: int = 6  # Default to 6-max (most popular online format)
     starting_stack: float = 100.0
     small_blind: float = 1.0
     big_blind: float = 2.0
-    max_raises: int = 3
+    max_raises: int = -1  # No limit on raises (NLHE)
 
 
 @dataclass
@@ -191,12 +191,18 @@ class PokerEngine:
             else:
                 valid_actions.append(Action.FOLD)
         
-        # Bet/Raise if have chips
+        # Bet/Raise if have chips (No Limit rules)
         if player_stack > 0:
             if state.current_bet == 0:
                 valid_actions.append(Action.BET)
             else:
-                valid_actions.append(Action.RAISE)
+                # Can raise if have more than call amount
+                call_amount = state.current_bet - player_bet
+                if player_stack > call_amount:
+                    valid_actions.append(Action.RAISE)
+            
+            # Can always go all-in if have chips (No Limit)
+            valid_actions.append(Action.ALL_IN)
         
         return valid_actions
     
@@ -235,22 +241,50 @@ class PokerEngine:
             new_pot += call_amount
             
         elif action == Action.BET:
-            # Player bets (assume minimum bet)
-            bet_amount = self.config.big_blind
+            # Player bets (No Limit - can bet any amount up to stack)
+            player_stack = state.players[player_id, 0]
+            # For simplicity, bet pot-sized (can be optimized later)
+            bet_amount = min(state.pot_size, player_stack)
+            if bet_amount < self.config.big_blind:
+                bet_amount = min(self.config.big_blind, player_stack)
+            
             new_players = new_players.at[player_id, 0].add(-bet_amount)
             new_players = new_players.at[player_id, 1].set(bet_amount)
             new_current_bet = bet_amount
             new_pot += bet_amount
             
         elif action == Action.RAISE:
-            # Player raises
-            raise_amount = state.current_bet * 2  # Simple 2x raise
-            total_bet = raise_amount
-            to_call = total_bet - state.players[player_id, 1]
+            # Player raises (No Limit - can raise any amount)
+            player_stack = state.players[player_id, 0]
+            current_player_bet = state.players[player_id, 1]
+            
+            # Minimum raise = current bet + previous raise amount
+            min_raise = state.current_bet * 2
+            
+            # For AI simplicity, raise pot-sized (can be optimized)
+            raise_to = min(min_raise + state.pot_size, state.current_bet + player_stack)
+            
+            to_call = raise_to - current_player_bet
             new_players = new_players.at[player_id, 0].add(-to_call)
-            new_players = new_players.at[player_id, 1].set(total_bet)
-            new_current_bet = total_bet
+            new_players = new_players.at[player_id, 1].set(raise_to)
+            new_current_bet = raise_to
             new_pot += to_call
+            
+        elif action == Action.ALL_IN:
+            # Player goes all-in (No Limit)
+            player_stack = state.players[player_id, 0]
+            current_player_bet = state.players[player_id, 1]
+            
+            # Bet entire remaining stack
+            all_in_amount = current_player_bet + player_stack
+            new_players = new_players.at[player_id, 0].set(0.0)  # Stack = 0
+            new_players = new_players.at[player_id, 1].set(all_in_amount)
+            new_players = new_players.at[player_id, 3].set(1.0)  # Mark as all-in
+            
+            if all_in_amount > state.current_bet:
+                new_current_bet = all_in_amount
+            
+            new_pot += player_stack
         
         # Find next active player
         next_player = self._next_active_player(state, player_id)
@@ -340,6 +374,45 @@ class PokerEngine:
         """Get hole cards for a player"""
         # Deal from deck (simplified)
         return [state.deck[player_id * 2].item(), state.deck[player_id * 2 + 1].item()]
+    
+    def get_information_set(self, state: GameState, player_id: int) -> str:
+        """
+        Get information set string for CFR training
+        
+        Args:
+            state: Current game state
+            player_id: Player ID
+            
+        Returns:
+            Information set string for this player's perspective
+        """
+        # Get player's hole cards
+        hole_cards = self.get_hole_cards(state, player_id)
+        
+        # Get visible community cards based on phase
+        visible_community = []
+        if state.phase >= 1:  # Flop
+            visible_community = state.community_cards[:3].tolist()
+        if state.phase >= 2:  # Turn
+            visible_community = state.community_cards[:4].tolist()
+        if state.phase >= 3:  # River
+            visible_community = state.community_cards[:5].tolist()
+        
+        # Get betting action history for this round
+        recent_history = state.betting_history[-10:]  # Last 10 actions
+        
+        # Get position info
+        position = (player_id - state.button_position) % self.config.players
+        
+        # Create compact info set string
+        info_set = (f"pos{position}_phase{state.phase}_"
+                   f"hole{'-'.join(map(str, hole_cards))}_"
+                   f"board{'-'.join(map(str, visible_community))}_"
+                   f"pot{int(state.pot_size)}_"
+                   f"bet{int(state.current_bet)}_"
+                   f"hist{''.join(recent_history[:5])}")  # Last 5 actions
+        
+        return info_set
 
 
 # Factory function

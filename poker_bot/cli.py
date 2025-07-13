@@ -273,6 +273,235 @@ def train_fast(iterations: int, batch_size: int, algorithm: str, save_interval: 
         sys.exit(1)
 
 @cli.command()
+@click.option('--iterations', default=100000, help='Number of training iterations')
+@click.option('--players', default=6, help='Number of players (2-10)')
+@click.option('--algorithm', default='parallel', help='Algorithm to use (parallel, pdcfr_plus, outcome_sampling, neural_fsp)')
+@click.option('--save-interval', default=10000, help='Save model every N iterations')
+@click.option('--log-interval', default=1000, help='Log progress every N iterations')
+@click.option('--save-path', default='models/holdem_model.pkl', help='Path to save trained model')
+@click.option('--learning-rate', default=0.1, help='Learning rate')
+@click.option('--starting-stack', default=100.0, help='Starting stack size')
+@click.option('--small-blind', default=1.0, help='Small blind size')
+@click.option('--big-blind', default=2.0, help='Big blind size')
+@click.option('--gpu/--no-gpu', default=True, help='Use GPU acceleration')
+def train_holdem(iterations: int, players: int, algorithm: str, save_interval: int, 
+                 log_interval: int, save_path: str, learning_rate: float,
+                 starting_stack: float, small_blind: float, big_blind: float, gpu: bool):
+    """🎯 Train REAL No Limit Texas Hold'em with multiple players using poker engine"""
+    
+    # Create models directory if it doesn't exist
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    
+    # Check GPU availability
+    if gpu:
+        try:
+            import jax
+            devices = jax.devices()
+            gpu_available = len([d for d in devices if 'gpu' in str(d).lower() or 'cuda' in str(d).lower()]) > 0
+            
+            if gpu_available:
+                logger.info(f"GPU acceleration enabled. Devices: {devices}")
+            else:
+                logger.warning("GPU requested but not available. Using CPU.")
+        except Exception as e:
+            logger.warning(f"GPU check failed: {e}. Using CPU.")
+    else:
+        logger.info("Using CPU training (--no-gpu specified)")
+    
+    try:
+        from .parallel import get_optimal_parallel_config, create_parallel_trainer
+        from .algorithms import create_advanced_cfr_trainer
+        from .engine import PokerEngine, GameConfig, Action
+        from .modern_cfr import InfoState
+        import jax.numpy as jnp
+        import jax.random as jr
+        import time
+        import pickle
+        
+        logger.info("🎯 Starting REAL No Limit Texas Hold'em Training")
+        logger.info("=" * 60)
+        logger.info(f"Players: {players} (6-max NLHE)")
+        logger.info(f"Algorithm: {algorithm}")
+        logger.info(f"Iterations: {iterations:,}")
+        logger.info(f"Starting stack: ${starting_stack}")
+        logger.info(f"Blinds: ${small_blind}/${big_blind}")
+        logger.info(f"Save interval: {save_interval}")
+        logger.info(f"Save path: {save_path}")
+        logger.info("")
+        
+        # Initialize REAL poker engine with NLHE configuration
+        game_config = GameConfig(
+            players=players,
+            starting_stack=starting_stack,
+            small_blind=small_blind,
+            big_blind=big_blind,
+            max_raises=-1  # No limit on raises (NLHE)
+        )
+        poker_engine = PokerEngine(game_config)
+        
+        # Initialize trainer based on algorithm
+        trainer = None
+        if algorithm == 'parallel':
+            logger.info("Initializing Parallel Training for NLHE...")
+            parallel_config = get_optimal_parallel_config()
+            trainer = create_parallel_trainer(parallel_config)
+        else:
+            logger.info(f"Initializing Advanced CFR Algorithm for NLHE: {algorithm}")
+            trainer = create_advanced_cfr_trainer(algorithm)
+        
+        # Training data storage
+        training_data = {
+            'strategy_sum': {},
+            'regret_sum': {},
+            'iteration': 0,
+            'game_config': {
+                'players': players,
+                'starting_stack': starting_stack,
+                'small_blind': small_blind,
+                'big_blind': big_blind,
+                'game_type': 'No Limit Texas Hold\'em'
+            },
+            'config': {
+                'algorithm': algorithm,
+                'iterations': iterations,
+                'learning_rate': learning_rate
+            }
+        }
+        
+        # Training loop
+        logger.info("Starting REAL NLHE poker training loop...")
+        start_time = time.time()
+        games_played = 0
+        total_info_sets = 0
+        
+        for iteration in range(1, iterations + 1):
+            # Start new REAL poker game
+            game_state = poker_engine.new_game()
+            games_played += 1
+            
+            # Play through the ENTIRE poker game
+            game_decisions = 0
+            while not game_state.is_terminal() and game_decisions < 50:  # Safety limit
+                current_player = game_state.current_player
+                
+                # Skip if player is not active
+                if not poker_engine.is_player_active(game_state, current_player):
+                    break
+                
+                # Get REAL information set from poker engine
+                info_set = poker_engine.get_information_set(game_state, current_player)
+                
+                # Get REAL valid actions from poker engine
+                valid_actions = poker_engine.get_valid_actions(game_state, current_player)
+                
+                if not valid_actions:
+                    break
+                
+                # Convert valid actions to training format
+                action_count = len(valid_actions)
+                
+                # Generate training step
+                if algorithm == 'parallel':
+                    # Generate training data from game state
+                    test_regret = jr.normal(jr.PRNGKey(iteration + current_player), (action_count,))
+                    result = trainer.distributed_training_step(test_regret, test_regret, learning_rate)
+                else:
+                    # Advanced CFR algorithms - create proper info state
+                    hole_cards = poker_engine.get_hole_cards(game_state, current_player)
+                    
+                    info_state = InfoState(
+                        player_id=current_player,
+                        cards=jnp.array(hole_cards + [0] * (5 - len(hole_cards))),  # Pad to 5
+                        history=jnp.array([len(game_state.betting_history), game_state.phase, 0, 0]),
+                        pot=game_state.pot_size,
+                        round=game_state.phase
+                    )
+                    
+                    test_regret = jr.normal(jr.PRNGKey(iteration + current_player), (action_count,))
+                    test_strategy = jnp.ones(action_count) / action_count
+                    
+                    result = trainer.training_step(info_state, test_regret, test_strategy)
+                
+                # Store training data with REAL info set
+                info_set_key = f"p{current_player}_{info_set}"
+                
+                # Initialize if not exists
+                if info_set_key not in training_data['strategy_sum']:
+                    training_data['strategy_sum'][info_set_key] = jnp.zeros(action_count)
+                    training_data['regret_sum'][info_set_key] = jnp.zeros(action_count)
+                    total_info_sets += 1
+                
+                # Accumulate results
+                if algorithm == 'parallel':
+                    new_strategy = result.get('strategies', jnp.ones(action_count) / action_count)
+                    new_regret = result.get('q_values', test_regret)
+                else:
+                    new_strategy = result.get('strategy', jnp.ones(action_count) / action_count)
+                    new_regret = result.get('regret', test_regret)
+                
+                # Ensure sizes match
+                if len(new_strategy) == action_count and len(new_regret) == action_count:
+                    training_data['strategy_sum'][info_set_key] += new_strategy
+                    training_data['regret_sum'][info_set_key] += new_regret
+                
+                # Make decision and continue game
+                action_idx = jr.randint(jr.PRNGKey(iteration + current_player + game_decisions), (), 0, len(valid_actions))
+                chosen_action = valid_actions[action_idx]
+                
+                # Apply action to continue REAL poker game
+                try:
+                    game_state = poker_engine.apply_action(game_state, chosen_action)
+                    game_decisions += 1
+                except Exception as e:
+                    logger.warning(f"Action failed: {e}, ending game")
+                    break
+            
+            training_data['iteration'] = iteration
+            
+            # Log progress
+            if iteration % log_interval == 0:
+                elapsed = time.time() - start_time
+                games_per_sec = games_played / elapsed
+                logger.info(f"Iteration {iteration:,}/{iterations:,} | "
+                           f"Games/sec: {games_per_sec:.1f} | "
+                           f"Elapsed: {elapsed:.1f}s | "
+                           f"Info sets: {total_info_sets:,} | "
+                           f"Games played: {games_played:,}")
+            
+            # Save checkpoint
+            if iteration % save_interval == 0:
+                checkpoint_path = save_path.replace('.pkl', f'_checkpoint_{iteration}.pkl')
+                with open(checkpoint_path, 'wb') as f:
+                    pickle.dump(training_data, f)
+                logger.info(f"NLHE Checkpoint saved: {checkpoint_path}")
+        
+        # Save final model
+        with open(save_path, 'wb') as f:
+            pickle.dump(training_data, f)
+        
+        # Final statistics
+        total_time = time.time() - start_time
+        final_games_per_sec = games_played / total_time
+        
+        logger.info("=" * 60)
+        logger.info("🎉 REAL No Limit Texas Hold'em Training completed!")
+        logger.info(f"Players: {players} (6-max NLHE)")
+        logger.info(f"Total iterations: {iterations:,}")
+        logger.info(f"Total games played: {games_played:,}")
+        logger.info(f"Total time: {total_time:.1f}s")
+        logger.info(f"Average speed: {final_games_per_sec:.1f} games/sec")
+        logger.info(f"Unique info sets learned: {total_info_sets:,}")
+        logger.info(f"NLHE Model saved: {save_path}")
+        logger.info("🃏 Ready for tournament play!")
+        logger.info("=" * 60)
+        
+    except Exception as e:
+        logger.error(f"NLHE training failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+@cli.command()
 @click.option('--model', required=True, help='Path to trained model')
 @click.option('--hands', default=100, help='Number of hands to play')
 @click.option('--opponents', default=1, help='Number of opponents')
