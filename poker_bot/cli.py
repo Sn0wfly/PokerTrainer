@@ -56,8 +56,8 @@ def evaluate_straight_vectorized(ranks: jnp.ndarray) -> bool:
     for i in range(13):
         consecutive_count = jax.lax.cond(
             rank_present[i],
-            lambda: consecutive_count + 1,
-            lambda: 0
+            lambda: jnp.array(consecutive_count + 1, dtype=jnp.int32),
+            lambda: jnp.array(0, dtype=jnp.int32)
         )
         max_consecutive = jnp.maximum(max_consecutive, consecutive_count)
     
@@ -329,8 +329,8 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
         def evaluate_player_hand(i):
             return jax.lax.cond(
                 active_mask[i] > 0,
-                lambda: evaluate_hand_jax(hole_cards[i], final_community),
-                lambda: -1
+                lambda: jnp.array(evaluate_hand_jax(hole_cards[i], final_community), dtype=jnp.int32),
+                lambda: jnp.array(-1, dtype=jnp.int32)
             )
         
         # Use vmap to evaluate all hands in parallel
@@ -1864,7 +1864,7 @@ def gpu_intensive_hand_evaluation(all_cards: jnp.ndarray) -> jnp.ndarray:
             lambda: jnp.array(7.0 + jnp.sum(suit_products) % 100, dtype=jnp.float32),
             lambda: jax.lax.cond(
                 (max_rank_count == 3) & (unique_ranks == 2),
-                lambda: jnp.array(6.0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100, dtype=jnp.float32),
+                lambda: jnp.array(6.0 + jnp.array(hand_complexity, dtype=jnp.float32) % 100, dtype=jnp.float32),
                 lambda: jax.lax.cond(
                     is_flush,
                     lambda: jnp.array(5.0 + jnp.sum(rank_matrix) % 100, dtype=jnp.float32),
@@ -1873,14 +1873,14 @@ def gpu_intensive_hand_evaluation(all_cards: jnp.ndarray) -> jnp.ndarray:
                         lambda: jnp.array(4.0 + jnp.sum(suit_matrix) % 100, dtype=jnp.float32),
                         lambda: jax.lax.cond(
                             max_rank_count == 3,
-                            lambda: jnp.array(3.0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100, dtype=jnp.float32),
+                            lambda: jnp.array(3.0 + jnp.array(hand_complexity, dtype=jnp.float32) % 100, dtype=jnp.float32),
                             lambda: jax.lax.cond(
                                 (max_rank_count == 2) & (unique_ranks == 3),
                                 lambda: jnp.array(2.0 + jnp.sum(rank_products) % 100, dtype=jnp.float32),
                                 lambda: jax.lax.cond(
                                     max_rank_count == 2,
                                     lambda: jnp.array(1.0 + jnp.sum(suit_products) % 100, dtype=jnp.float32),
-                                    lambda: jnp.array(0.0 + jnp.array(hand_complexity, dtype=jnp.int32) % 100, dtype=jnp.float32)
+                                    lambda: jnp.array(0.0 + jnp.array(hand_complexity, dtype=jnp.float32) % 100, dtype=jnp.float32)
                                 )
                             )
                         )
