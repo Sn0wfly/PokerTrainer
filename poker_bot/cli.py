@@ -232,7 +232,7 @@ def evaluate(model: Optional[str]):
 @click.option('--batch-size', default=512, help='Batch size for testing')
 @click.option('--temperature', default=1.0, help='Temperature for strategy computation')
 @click.option('--learning-rate', default=0.1, help='Learning rate for Q-value updates')
-def test_modern():
+def test_modern(iterations: int, batch_size: int, temperature: float, learning_rate: float):
     """Test the modern CFVFP architecture"""
     
     try:
