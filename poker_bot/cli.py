@@ -134,7 +134,7 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     # Hole cards (2 cards per player)
     hole_cards = jnp.zeros((MAX_PLAYERS, 2), dtype=jnp.int32)
     for i in range(MAX_PLAYERS):
-        hole_cards = hole_cards.at[i].set(deck[i*2:(i+1)*2])
+        hole_cards = hole_cards.at[i].set(jax.lax.dynamic_slice(deck, [i*2], [2]))
     
     # Community cards (will be dealt progressively)
     community_cards = jnp.array([-1, -1, -1, -1, -1])  # Start empty
@@ -147,22 +147,25 @@ def simulate_real_holdem_vectorized(rng_key: jnp.ndarray, game_config: Dict[str,
     def betting_round(carry):
         phase, player_stacks, player_bets, player_folded, pot, current_bet, community_cards, decisions_made, rng_key = carry
         
-        # Deal community cards based on phase
+        # Deal community cards based on phase using JAX dynamic slicing
+        # Calculate dynamic positions for community cards after hole cards
+        hole_cards_end = players * 2
+        
         community_cards = jax.lax.cond(
             phase == 1,  # Flop
-            lambda cc: cc.at[0:3].set(deck[players*2+1:players*2+4]),  # Skip burn card
+            lambda cc: cc.at[0:3].set(jax.lax.dynamic_slice(deck, [hole_cards_end + 1], [3])),  # Skip burn card
             lambda cc: cc,
             community_cards
         )
         community_cards = jax.lax.cond(
             phase == 2,  # Turn
-            lambda cc: cc.at[3].set(deck[players*2+5]),  # Skip burn card
+            lambda cc: cc.at[3].set(jax.lax.dynamic_slice(deck, [hole_cards_end + 5], [1])[0]),  # Skip burn card
             lambda cc: cc,
             community_cards
         )
         community_cards = jax.lax.cond(
             phase == 3,  # River
-            lambda cc: cc.at[4].set(deck[players*2+7]),  # Skip burn card
+            lambda cc: cc.at[4].set(jax.lax.dynamic_slice(deck, [hole_cards_end + 7], [1])[0]),  # Skip burn card
             lambda cc: cc,
             community_cards
         )
