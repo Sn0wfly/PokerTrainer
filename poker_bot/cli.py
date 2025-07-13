@@ -178,14 +178,23 @@ def train_fast(iterations: int, batch_size: int, algorithm: str, save_interval: 
         start_time = time.time()
         
         for iteration in range(1, iterations + 1):
-            # Create test info state for training
+            # Create test info state for training with more diversity
             key = jr.PRNGKey(iteration)
+            subkeys = jr.split(key, 4)
+            
+            # More diverse info states
+            player_id = iteration % 2
+            round_num = iteration % 4
+            cards = jr.randint(subkeys[0], (5,), 1, 53)  # Random cards 1-52
+            history = jr.randint(subkeys[1], (4,), 0, 4)  # Random history 0-3
+            pot = 10.0 + (iteration % 1000)  # More pot variety
+            
             test_info_state = InfoState(
-                player_id=iteration % 2,
-                cards=jnp.array([1, 2, 3, 4, 5]),
-                history=jnp.array([0, 1, 0, 1]),
-                pot=10.0 + (iteration % 100),
-                round=iteration % 4
+                player_id=player_id,
+                cards=cards,
+                history=history,
+                pot=pot,
+                round=round_num
             )
             
             # Generate training data
@@ -200,16 +209,30 @@ def train_fast(iterations: int, batch_size: int, algorithm: str, save_interval: 
                 # Use advanced CFR algorithm
                 result = trainer.training_step(test_info_state, test_regret, test_strategy)
             
-            # Update training data
-            info_set_key = f"player_{test_info_state.player_id}_round_{test_info_state.round}"
+            # Update training data - ACCUMULATE instead of overwrite
+            # Create more unique info_set_key including cards and history
+            cards_str = "_".join(map(str, test_info_state.cards))
+            history_str = "_".join(map(str, test_info_state.history))
+            info_set_key = f"p{test_info_state.player_id}_r{test_info_state.round}_c{cards_str}_h{history_str}"
+            
+            # Initialize if not exists
+            if info_set_key not in training_data['strategy_sum']:
+                training_data['strategy_sum'][info_set_key] = jnp.zeros(4)
+                training_data['regret_sum'][info_set_key] = jnp.zeros(4)
+            
             if algorithm == 'parallel':
-                # Handle parallel training results
-                training_data['strategy_sum'][info_set_key] = result.get('strategies', test_strategy)
-                training_data['regret_sum'][info_set_key] = result.get('q_values', test_regret)
+                # Handle parallel training results - ACCUMULATE
+                new_strategy = result.get('strategies', test_strategy)
+                new_regret = result.get('q_values', test_regret)
+                training_data['strategy_sum'][info_set_key] += new_strategy
+                training_data['regret_sum'][info_set_key] += new_regret
             else:
-                # Handle advanced CFR algorithm results
-                training_data['strategy_sum'][info_set_key] = result.get('strategy', test_strategy)
-                training_data['regret_sum'][info_set_key] = result.get('regret', test_regret)
+                # Handle advanced CFR algorithm results - ACCUMULATE
+                new_strategy = result.get('strategy', test_strategy)
+                new_regret = result.get('regret', test_regret)
+                training_data['strategy_sum'][info_set_key] += new_strategy
+                training_data['regret_sum'][info_set_key] += new_regret
+            
             training_data['iteration'] = iteration
             
             # Log progress
