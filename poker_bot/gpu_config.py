@@ -11,18 +11,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# XLA Performance Flags (JAX 2025)
+# XLA Performance Flags (JAX 0.4.29 compatible)
 XLA_FLAGS = (
-    '--xla_gpu_triton_gemm_any=True '
-    '--xla_gpu_enable_latency_hiding_scheduler=true '
-    '--xla_gpu_enable_highest_priority_async_stream=true '
-    '--xla_gpu_enable_triton_softmax_fusion=true '
-    '--xla_gpu_enable_async_collectives=true '
-    '--xla_gpu_all_gather_combine_threshold_bytes=134217728 '
-    '--xla_gpu_all_reduce_combine_threshold_bytes=134217728 '
-    '--xla_gpu_reduce_scatter_combine_threshold_bytes=134217728 '
-    '--xla_gpu_enable_command_buffer= '
-    '--xla_gpu_memory_limit_slop_factor=95 '
+    '--xla_gpu_enable_triton_gemm=true '
+    '--xla_gpu_autotune_level=4 '
+    '--xla_gpu_force_compilation_parallelism=0 '
+    '--xla_gpu_enable_cudnn_frontend=true '
 )
 
 def setup_gpu_optimization():
