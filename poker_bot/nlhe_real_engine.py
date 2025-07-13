@@ -114,6 +114,7 @@ def betting_round_vectorized(rng_keys: jnp.ndarray, stacks: jnp.ndarray,
     # VECTORIZED POSITION DETERMINATION
     # Determine current position for each player
     positions = jnp.arange(6)[None, :]  # (1, 6) -> (batch, 6)
+    positions = positions.repeat(batch_size, axis=0)  # (batch, 6)
     
     # VECTORIZED ACTION GENERATION
     # Generate actions for all players in all games

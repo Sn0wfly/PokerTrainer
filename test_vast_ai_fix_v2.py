@@ -89,10 +89,10 @@ def test_cfr_trainer():
     print("\n🧠 Testing CFR trainer...")
     
     try:
-        from poker_bot.nlhe_cfr_trainer import NLHECFRTrainer
+        from poker_bot.nlhe_cfr_trainer import NLHE6PlayerCFRTrainer
         
         # Create trainer with small batch size
-        trainer = NLHECFRTrainer(batch_size=50)
+        trainer = NLHE6PlayerCFRTrainer(batch_size=50)
         
         print("🔄 Running 5 training iterations...")
         start_time = time.time()
