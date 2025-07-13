@@ -67,53 +67,80 @@ class MultiGPUTrainer:
         
     def _setup_device_mesh(self):
         """Setup device mesh for parallel computation"""
-        self.device_mesh = jax.sharding.Mesh(
-            devices=jnp.array(self.devices).reshape(-1),
-            axis_names=('device',)
-        )
-        logger.info(f"Device mesh setup: {self.device_mesh}")
+        if len(self.devices) == 1:
+            # Single device case - no mesh needed for CPU-only training
+            self.device_mesh = None
+            logger.info(f"Single device detected: {self.devices[0]}, skipping mesh setup")
+        else:
+            # Multi-device case
+            import numpy as np
+            devices_array = np.array(self.devices).reshape(-1)
+            self.device_mesh = jax.sharding.Mesh(
+                devices=devices_array,
+                axis_names=('device',)
+            )
+            logger.info(f"Device mesh setup: {self.device_mesh}")
     
-    @functools.partial(pmap, axis_name='device')
     def parallel_q_update(self, q_values: jnp.ndarray, 
                          regrets: jnp.ndarray,
                          learning_rate: float) -> jnp.ndarray:
         """Parallel Q-value update across devices"""
-        # Q-value update with gradient accumulation
-        q_update = learning_rate * regrets
-        new_q_values = q_values + q_update
-        
-        # Synchronize across devices
-        new_q_values = jax.lax.pmean(new_q_values, axis_name='device')
-        
-        return new_q_values
+        if self.num_devices == 1:
+            # Single device - no parallelization needed
+            q_update = learning_rate * regrets
+            new_q_values = q_values + q_update
+            return new_q_values
+        else:
+            # Multi-device case with pmap
+            @functools.partial(pmap, axis_name='device')
+            def _parallel_update(q_vals, regr, lr):
+                q_update = lr * regr
+                new_q_vals = q_vals + q_update
+                # Synchronize across devices
+                new_q_vals = jax.lax.pmean(new_q_vals, axis_name='device')
+                return new_q_vals
+            
+            return _parallel_update(q_values, regrets, learning_rate)
     
-    @functools.partial(pmap, axis_name='device')
     def parallel_strategy_computation(self, q_values: jnp.ndarray,
                                     temperature: float) -> jnp.ndarray:
         """Parallel strategy computation with temperature scaling"""
-        # Apply temperature scaling
-        scaled_q = q_values / temperature
-        
-        # Softmax for strategy probabilities
-        strategy = jax.nn.softmax(scaled_q, axis=-1)
-        
-        # Synchronize strategies across devices
-        strategy = jax.lax.pmean(strategy, axis_name='device')
-        
-        return strategy
+        if self.num_devices == 1:
+            # Single device - no parallelization needed
+            scaled_q = q_values / temperature
+            strategy = jax.nn.softmax(scaled_q, axis=-1)
+            return strategy
+        else:
+            # Multi-device case with pmap
+            @functools.partial(pmap, axis_name='device')
+            def _parallel_strategy(q_vals, temp):
+                scaled_q = q_vals / temp
+                strategy = jax.nn.softmax(scaled_q, axis=-1)
+                # Synchronize strategies across devices
+                strategy = jax.lax.pmean(strategy, axis_name='device')
+                return strategy
+            
+            return _parallel_strategy(q_values, temperature)
     
     def replicate_data(self, data: jnp.ndarray) -> jnp.ndarray:
         """Replicate data across devices for parallel processing"""
-        if data.ndim == 1:
-            # Add device dimension
-            data = data[None, :]
-        
-        return jnp.repeat(data[None, :], self.num_devices, axis=0)
+        if self.num_devices == 1:
+            # Single device - return data as is
+            return data
+        else:
+            # Multi-device - replicate across devices
+            if data.ndim == 1:
+                data = data[None, :]
+            return jnp.repeat(data[None, :], self.num_devices, axis=0)
     
     def gather_results(self, parallel_results: jnp.ndarray) -> jnp.ndarray:
         """Gather results from parallel computation"""
-        # Take mean across devices
-        return jnp.mean(parallel_results, axis=0)
+        if self.num_devices == 1:
+            # Single device - return results as is
+            return parallel_results
+        else:
+            # Multi-device - take mean across devices
+            return jnp.mean(parallel_results, axis=0)
 
 class GradientCheckpointManager:
     """Manage gradient checkpointing for memory efficiency"""
