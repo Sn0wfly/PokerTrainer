@@ -226,24 +226,32 @@ def memory_efficient_cross_entropy(logits: jnp.ndarray,
 class MemoryMonitor:
     """Context manager for monitoring memory usage"""
     
-    def __init__(self, name: str, log_interval: int = 1000):
+    def __init__(self, name: str, log_interval: int = 100):  # Changed from 1000 to 100
         self.name = name
         self.log_interval = log_interval
         self.step_count = 0
         self.start_memory = None
+        self.total_enters = 0  # Track total context manager enters
     
     def __enter__(self):
-        self.start_memory = get_memory_usage()
-        log_memory_usage(f"[{self.name}] Start: ")
+        self.total_enters += 1
+        # Only log every log_interval enters to prevent spam
+        if self.total_enters % self.log_interval == 0:
+            self.start_memory = get_memory_usage()
+            log_memory_usage(f"[{self.name}] Start (step {self.total_enters}): ")
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        end_memory = get_memory_usage()
-        memory_diff = end_memory['process_memory_mb'] - self.start_memory['process_memory_mb']
-        logger.info(f"[{self.name}] Memory change: {memory_diff:+.1f}MB")
+        # Only log exits that correspond to logged enters
+        if self.total_enters % self.log_interval == 0 and self.start_memory is not None:
+            end_memory = get_memory_usage()
+            memory_diff = end_memory['process_memory_mb'] - self.start_memory['process_memory_mb']
+            logger.info(f"[{self.name}] Memory change (step {self.total_enters}): {memory_diff:+.1f}MB")
         
         if exc_type is not None:
             logger.error(f"[{self.name}] Exception occurred: {exc_val}")
+        
+        self.start_memory = None
     
     def step(self):
         """Log memory usage at intervals"""

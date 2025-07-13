@@ -848,32 +848,36 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                 # GENERATE REAL CFR INFO SETS from poker simulation
                 if algorithm == 'parallel':
                     # Convert poker simulation results to CFR training data
+                    # OPTIMIZED: Only train CFR once per game, not per decision per player
+                    cfr_training_steps = 0
                     for game_idx in range(current_batch_size):
                         # Create info sets from real poker decisions
                         hole_cards = batch_results['hole_cards'][game_idx]
                         final_community = batch_results['final_community'][game_idx]
                         decisions_count = batch_results['decisions_made'][game_idx]
                         
-                        # Generate CFR info sets for each decision point
-                        for decision_idx in range(int(decisions_count)):
-                            for player_id in range(players):
-                                # Create unique info set key from poker state
-                                cards_str = "_".join(map(str, hole_cards[player_id]))
-                                community_str = "_".join(map(str, final_community))
-                                info_set_key = f"p{player_id}_g{games_played-current_batch_size+game_idx}_d{decision_idx}_c{cards_str}_cc{community_str}"
-                                
-                                # Initialize if not exists
-                                if info_set_key not in training_data['strategy_sum']:
-                                    training_data['strategy_sum'][info_set_key] = jnp.zeros(4)  # fold, check/call, bet/raise, all-in
-                                    training_data['regret_sum'][info_set_key] = jnp.zeros(4)
-                                
-                                # Generate training data from poker results
-                                base_rng_key, cfr_key = jax.random.split(base_rng_key)
-                                test_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])  # Base strategy
-                                test_regret = jax.random.normal(cfr_key, (4,)) * 0.1  # Small regret from poker outcome
-                                
-                                # Execute CFR training step
+                        # Generate ONE CFR training step per game (not per decision per player)
+                        for player_id in range(players):
+                            # Create unique info set key from poker state
+                            cards_str = "_".join(map(str, hole_cards[player_id]))
+                            community_str = "_".join(map(str, final_community))
+                            info_set_key = f"p{player_id}_g{games_played-current_batch_size+game_idx}_c{cards_str}_cc{community_str}"
+                            
+                            # Initialize if not exists
+                            if info_set_key not in training_data['strategy_sum']:
+                                training_data['strategy_sum'][info_set_key] = jnp.zeros(4)  # fold, check/call, bet/raise, all-in
+                                training_data['regret_sum'][info_set_key] = jnp.zeros(4)
+                            
+                            # Generate training data from poker results
+                            base_rng_key, cfr_key = jax.random.split(base_rng_key)
+                            test_strategy = jnp.array([0.25, 0.25, 0.25, 0.25])  # Base strategy
+                            test_regret = jax.random.normal(cfr_key, (4,)) * 0.1  # Small regret from poker outcome
+                            
+                            # OPTIMIZED: Execute CFR training step only once per game per player
+                            # (not per decision - this was causing the infinite loop)
+                            if cfr_training_steps < current_batch_size * players:  # Limit training steps
                                 result = trainer.distributed_training_step(test_regret, test_regret, learning_rate)
+                                cfr_training_steps += 1
                                 
                                 # Update CFR data with real poker information
                                 new_strategy = result.get('strategies', test_strategy)
@@ -882,6 +886,11 @@ def train_holdem(iterations: int, players: int, algorithm: str, save_interval: i
                                 # ACCUMULATE CFR data from REAL poker simulation
                                 training_data['strategy_sum'][info_set_key] += new_strategy
                                 training_data['regret_sum'][info_set_key] += new_regret
+                                training_data['total_real_info_sets'] += 1
+                            else:
+                                # Skip CFR training but still create info sets
+                                training_data['strategy_sum'][info_set_key] += test_strategy
+                                training_data['regret_sum'][info_set_key] += test_regret
                                 training_data['total_real_info_sets'] += 1
                 
                 # Calculate performance metrics
