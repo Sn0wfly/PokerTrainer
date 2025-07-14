@@ -1248,6 +1248,27 @@ def play(model: str, hands: int, opponents: int, stack: float,
         sys.exit(1)
 
 @cli.command()
+@click.option('--model', default='models/real_cfvfp_model.pkl', help='Path to trained model')
+@click.option('--hands', default=3, help='Number of hands to visualize')
+def visualize(model: str, hands: int):
+    """Quick visualization of how the bot plays"""
+    try:
+        from .visualizer import quick_visualize
+        
+        logger.info(f"🎮 Starting poker visualization")
+        logger.info(f"🤖 Bot model: {model}")
+        logger.info(f"🃏 Hands to show: {hands}")
+        
+        quick_visualize(model, hands)
+        
+        logger.info("✅ Visualization completed!")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to visualize: {e}")
+        logger.info("💡 Try running training first: python -m poker_bot.cli train-cfvfp --iterations 1000")
+        raise
+
+@cli.command()
 @click.option('--model', help='Path to trained model to evaluate')
 def evaluate(model: Optional[str]):
     """Evaluate poker bot components"""
