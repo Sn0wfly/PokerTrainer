@@ -233,16 +233,18 @@ class DefinitiveHybridTrainer:
                 pot_size = pot_sizes_np[game_idx]
                 payoff = payoffs_np[game_idx, player_id]
                 
-                # Create hash components
+                # OPTIMIZED: Create hash components using direct byte conversion
+                # This avoids expensive string formatting and reduces CPU overhead
                 components = (
                     player_id,
-                    tuple(hole_cards),
-                    tuple(community_cards),
+                    hole_cards.tobytes(),  # Direct byte conversion
+                    community_cards.tobytes(),
                     round(pot_size, 2),  # Round to reduce hash collisions
                     round(payoff, 2)
                 )
                 
-                info_hash = hashlib.md5(str(components).encode()).hexdigest()
+                # Use repr() for faster tuple serialization than str()
+                info_hash = hashlib.md5(repr(components).encode()).hexdigest()
                 
                 # Get or create index
                 index = self._get_or_create_index(info_hash)
