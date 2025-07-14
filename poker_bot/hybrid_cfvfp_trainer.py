@@ -224,22 +224,33 @@ class HybridCFVFPTrainer:
         hand_strengths = vectorized_results['hand_strengths']
         player_ids = vectorized_results['player_ids']
         
-        # Create InfoSet objects outside of JAX compilation
+        # OPTIMIZED: Batch create InfoSet objects and process in chunks
         indices_to_update = []
-        for i in range(vectorized_results['total_info_sets']):
-            info_set = InfoSet(
-                player_id=int(player_ids[i]),
-                position=int(player_ids[i]),  # Simplified
-                hole_cards=hole_cards[i],
-                community_cards=community_cards[i],
-                pot_size=float(pot_sizes[i]),
-                stack_size=100.0,  # Simplified
-                hand_strength=float(hand_strengths[i]),
-                phase=3,  # River (simplified)
-                betting_history=jnp.array([1, 1, 1])  # Simplified
-            )
-            index = self._get_or_create_index(info_set)
-            indices_to_update.append(index)
+        chunk_size = 1000  # Process in chunks to reduce memory pressure
+        
+        for chunk_start in range(0, vectorized_results['total_info_sets'], chunk_size):
+            chunk_end = min(chunk_start + chunk_size, vectorized_results['total_info_sets'])
+            
+            # Create InfoSet objects for this chunk
+            chunk_info_sets = []
+            for i in range(chunk_start, chunk_end):
+                info_set = InfoSet(
+                    player_id=int(player_ids[i]),
+                    position=int(player_ids[i]),  # Simplified
+                    hole_cards=hole_cards[i],
+                    community_cards=community_cards[i],
+                    pot_size=float(pot_sizes[i]),
+                    stack_size=100.0,  # Simplified
+                    hand_strength=float(hand_strengths[i]),
+                    phase=3,  # River (simplified)
+                    betting_history=jnp.array([1, 1, 1])  # Simplified
+                )
+                chunk_info_sets.append(info_set)
+            
+            # Process chunk
+            for info_set in chunk_info_sets:
+                index = self._get_or_create_index(info_set)
+                indices_to_update.append(index)
         
         # VECTORIZED update for tracked indices
         if indices_to_update:
