@@ -152,6 +152,7 @@ class HybridCFVFPTrainer:
         flat_hole_cards = hole_cards.reshape(-1, 2)
         flat_payoffs = payoffs.reshape(-1)
         flat_final_pots = jnp.repeat(final_pots, num_players)
+        flat_community = jnp.repeat(final_community[:, None, :], num_players, axis=1).reshape(-1, 5)
         
         # Vectorized hand strength calculation
         def calculate_hand_strength_vectorized(hole_cards, community_cards):
@@ -160,7 +161,7 @@ class HybridCFVFPTrainer:
             community_sum = jnp.sum(community_cards, axis=1)
             return (hole_sum + community_sum) / 100.0
         
-        hand_strengths = calculate_hand_strength_vectorized(flat_hole_cards, final_community)
+        hand_strengths = calculate_hand_strength_vectorized(flat_hole_cards, flat_community)
         
         # Vectorized counterfactual values
         def compute_cf_values_vectorized(payoffs):
@@ -183,7 +184,7 @@ class HybridCFVFPTrainer:
                 player_id=player_id,
                 position=player_id,  # Simplified
                 hole_cards=flat_hole_cards[i],
-                community_cards=final_community[game_idx],
+                community_cards=flat_community[i],
                 pot_size=float(flat_final_pots[i]),
                 stack_size=100.0,  # Simplified
                 hand_strength=float(hand_strengths[i]),
