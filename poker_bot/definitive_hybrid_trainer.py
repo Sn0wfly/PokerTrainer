@@ -8,6 +8,7 @@ Key Innovations:
 - Scatter-gather updates for optimal GPU usage
 - Dynamic growth with minimal CPU overhead
 - PURE JIT functions for maximum performance
+- MULTIPROCESSING for CPU bottleneck optimization
 """
 
 import jax
@@ -16,6 +17,7 @@ import numpy as np
 import hashlib
 import pickle
 import logging
+import multiprocessing
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from functools import partial
@@ -65,20 +67,33 @@ def _static_vectorized_scatter_update(q_values: jnp.ndarray,
     new_strategies = strategies.at[indices].set(strategies_subset)
     
     return new_q_values, new_strategies
-    # GATHER: Get current Q-values for indices
-    current_q_subset = q_values[indices]
+
+# 🚀 MULTIPROCESSING FUNCTION: Process info set chunks in parallel
+def _process_info_set_chunk(data_chunk: List[Tuple]) -> List[str]:
+    """
+    🚀 MULTIPROCESSING FUNCTION: Process info set hashing in parallel
+    This function runs in a separate process to break the GIL
+    """
+    hashes = []
     
-    # UPDATE: Compute new Q-values
-    updated_q_subset = current_q_subset + learning_rate * (cf_values - current_q_subset)
+    for item in data_chunk:
+        player_id, hole_cards, community_cards, pot_size, payoff = item
+        
+        # OPTIMIZED: Create hash components using direct byte conversion
+        # This avoids expensive string formatting and reduces CPU overhead
+        components = (
+            player_id,
+            hole_cards.tobytes(),  # Direct byte conversion
+            community_cards.tobytes(),
+            round(pot_size, 2),  # Round to reduce hash collisions
+            round(payoff, 2)
+        )
+        
+        # Use repr() for faster tuple serialization than str()
+        info_hash = hashlib.md5(repr(components).encode()).hexdigest()
+        hashes.append(info_hash)
     
-    # SCATTER: Update Q-values
-    new_q_values = q_values.at[indices].set(updated_q_subset)
-    
-    # Update strategies
-    strategies_subset = jax.nn.softmax(updated_q_subset / temperature)
-    new_strategies = strategies.at[indices].set(strategies_subset)
-    
-    return new_q_values, new_strategies
+    return hashes
 
 class DefinitiveHybridTrainer:
     """
@@ -217,38 +232,38 @@ class DefinitiveHybridTrainer:
         num_players = payoffs_np.shape[1]
         total_info_sets = num_games * num_players
         
-        indices_to_update = []
-        
-        # Process in chunks to reduce memory pressure
-        for chunk_start in range(0, total_info_sets, self.config.chunk_size):
-            chunk_end = min(chunk_start + self.config.chunk_size, total_info_sets)
+        # Prepare data for multiprocessing
+        data_to_hash = []
+        for i in range(total_info_sets):
+            game_idx = i // num_players
+            player_id = i % num_players
             
-            for i in range(chunk_start, chunk_end):
-                game_idx = i // num_players
-                player_id = i % num_players
-                
-                # Build info set hash efficiently
-                hole_cards = hole_cards_np[game_idx, player_id]
-                community_cards = community_cards_np[game_idx]
-                pot_size = pot_sizes_np[game_idx]
-                payoff = payoffs_np[game_idx, player_id]
-                
-                # OPTIMIZED: Create hash components using direct byte conversion
-                # This avoids expensive string formatting and reduces CPU overhead
-                components = (
-                    player_id,
-                    hole_cards.tobytes(),  # Direct byte conversion
-                    community_cards.tobytes(),
-                    round(pot_size, 2),  # Round to reduce hash collisions
-                    round(payoff, 2)
-                )
-                
-                # Use repr() for faster tuple serialization than str()
-                info_hash = hashlib.md5(repr(components).encode()).hexdigest()
-                
-                # Get or create index
-                index = self._get_or_create_index(info_hash)
-                indices_to_update.append(index)
+            hole_cards = hole_cards_np[game_idx, player_id]
+            community_cards = community_cards_np[game_idx]
+            pot_size = pot_sizes_np[game_idx]
+            payoff = payoffs_np[game_idx, player_id]
+            
+            data_to_hash.append((player_id, hole_cards, community_cards, pot_size, payoff))
+        
+        # Process chunks in parallel
+        num_processes = multiprocessing.cpu_count()
+        chunk_size = (total_info_sets + num_processes - 1) // num_processes
+        chunks = [data_to_hash[i:i + chunk_size] for i in range(0, total_info_sets, chunk_size)]
+        
+        logger.info(f"   🚀 MULTIPROCESSING: Using {num_processes} processes for {total_info_sets} info sets")
+        logger.info(f"   📊 Chunk size: {chunk_size} info sets per process")
+        
+        with multiprocessing.Pool(processes=num_processes) as pool:
+            all_hashes = pool.map(_process_info_set_chunk, chunks)
+        
+        # Flatten the list of lists of hashes
+        all_hashes_flat = [h for sublist in all_hashes for h in sublist]
+        
+        # Get or create indices for all unique hashes
+        indices_to_update = []
+        for info_hash in all_hashes_flat:
+            index = self._get_or_create_index(info_hash)
+            indices_to_update.append(index)
         
         return jnp.array(indices_to_update)
     
