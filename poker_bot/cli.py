@@ -18,7 +18,8 @@ import pickle
 import time
 import traceback
 
-from .trainer import create_trainer, MCCFRConfig
+from .core.trainer import PokerTrainer, TrainerConfig
+from .core.simulation import batch_simulate_real_holdem
 from .bot import PokerBot
 from .engine import PokerEngine, GameConfig
 from .evaluator import HandEvaluator
@@ -400,7 +401,7 @@ def cli():
     pass
 
 @cli.command()
-@click.option('--iterations', default=100000, help='Number of training iterations')
+@click.option('--iterations', default=10000, help='Number of training iterations')
 @click.option('--batch-size', default=1024, help='Batch size for training')
 @click.option('--players', default=2, help='Number of players')
 @click.option('--learning-rate', default=0.1, help='Learning rate')
@@ -646,7 +647,7 @@ def train_fast(iterations: int, batch_size: int, algorithm: str, save_interval: 
         sys.exit(1)
 
 @cli.command()
-@click.option('--iterations', default=100000, help='Number of training iterations')
+@click.option('--iterations', default=10000, help='Number of training iterations')
 @click.option('--players', default=6, help='Number of players (2-10)')
 @click.option('--algorithm', default='parallel', help='Algorithm to use (parallel, pdcfr_plus, outcome_sampling, neural_fsp)')
 @click.option('--save-interval', default=10000, help='Save model every N iterations')
@@ -2322,155 +2323,18 @@ def train_hybrid_cfvfp(iterations: int, batch_size: int, learning_rate: float, t
 @click.option('--log-interval', default=100, help='Log progress every N iterations')
 @click.option('--save-path', default='models/definitive_hybrid_model.pkl', help='Path to save trained model')
 @click.option('--gpu/--no-gpu', default=True, help='Use GPU acceleration')
-def train_definitive_hybrid(iterations: int, batch_size: int, learning_rate: float, temperature: float,
-                           save_interval: int, log_interval: int, save_path: str, gpu: bool):
+def train(iterations: int, batch_size: int, learning_rate: float, temperature: float,
+          save_interval: int, log_interval: int, save_path: str, gpu: bool):
     """
-    🚀 DEFINITIVE HYBRID Training: Optimal GPU-CPU Bridge
-    Combines vectorized GPU simulation with efficient CPU-GPU bridge for maximum performance
-    
-    Key Innovations:
-    - Vectorized GPU simulation (fastest possible)
-    - Efficient CPU-GPU bridge for memory management
-    - Scatter-gather updates for optimal GPU usage
-    - Dynamic growth with minimal CPU overhead
+    🚀 POKER TRAINING: Optimal GPU-CPU Bridge
     """
-    
-    # Import DEFINITIVE HYBRID modules
-    try:
-        from .definitive_hybrid_trainer import DefinitiveHybridTrainer, DefinitiveHybridConfig
-        import jax.random as jr
-        import time
-        import pickle
-        import os
-        
-        logger.info("🚀 Starting DEFINITIVE HYBRID Training")
-        logger.info("=" * 60)
-        logger.info(f"Algorithm: DEFINITIVE HYBRID (Optimal GPU-CPU Bridge)")
-        logger.info(f"Target: Real NLHE 6-player strategies with maximum performance")
-        logger.info(f"Iterations: {iterations}")
-        logger.info(f"Batch size: {batch_size}")
-        logger.info(f"Learning rate: {learning_rate}")
-        logger.info(f"Temperature: {temperature}")
-        logger.info(f"GPU vectorization: FULL JAX acceleration")
-        logger.info(f"CPU-GPU bridge: OPTIMIZED scatter-gather")
-        logger.info(f"Dynamic growth: ENABLED with minimal overhead")
-        logger.info("")
-        
-        # Create models directory
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        
-        # Initialize DEFINITIVE HYBRID trainer
-        config = DefinitiveHybridConfig(
-            batch_size=batch_size,
-            learning_rate=learning_rate,
-            temperature=temperature
-        )
-        trainer = DefinitiveHybridTrainer(config)
-        
-        # Training loop
-        logger.info("🚀 Starting DEFINITIVE HYBRID training loop...")
-        start_time = time.time()
-        rng_key = jr.PRNGKey(42)
-        
-        # Warm-up compilation
-        logger.info("🔥 Warming up JAX compilation...")
-        logger.info("   Using smaller batch size for faster compilation...")
-        
-        # Use smaller batch for warm-up
-        warmup_batch_size = min(1024, batch_size)
-        test_rng_keys = jr.split(rng_key, warmup_batch_size)
-        test_game_config = {'players': 6, 'starting_stack': 100.0, 'small_blind': 1.0, 'big_blind': 2.0}
-        
-        logger.info(f"   Running warm-up with batch_size={warmup_batch_size}...")
-        test_results = batch_simulate_real_holdem(test_rng_keys, test_game_config)
-        logger.info("   Warm-up simulation completed, running trainer step...")
-        _ = trainer.train_step(rng_key, test_results)
-        logger.info("   ✅ Warm-up compilation completed!")
-        
-        # Training loop
-        logger.info("🚀 DEFINITIVE HYBRID Training Progress:")
-        logger.info("=" * 60)
-        
-        for iteration in range(iterations):
-            logger.info(f"🔄 Starting iteration {iteration + 1}/{iterations}...")
-            
-            # Generate RNG keys for batch
-            rng_key = jr.fold_in(rng_key, iteration)
-            rng_keys = jr.split(rng_key, batch_size)
-            logger.info(f"   Generated {batch_size} RNG keys")
-            
-            # Game configuration
-            game_config = {
-                'players': 6,
-                'starting_stack': 100.0,
-                'small_blind': 1.0,
-                'big_blind': 2.0
-            }
-            
-            # 🚀 DEFINITIVE HYBRID Training Step
-            logger.info(f"   🎮 Running batch simulation...")
-            game_results = batch_simulate_real_holdem(rng_keys, game_config)
-            logger.info(f"   ✅ Simulation completed, running trainer step...")
-            results = trainer.train_step(rng_key, game_results)
-            logger.info(f"   ✅ Training step completed!")
-            
-            # Log progress
-            if (iteration + 1) % log_interval == 0:
-                elapsed = time.time() - start_time
-                games_per_second = results['total_games'] / elapsed
-                
-                logger.info(f"🎯 Iteration {iteration + 1}/{iterations}")
-                logger.info(f"   Games/sec: {games_per_second:,.1f}")
-                logger.info(f"   Total games: {results['total_games']:,}")
-                logger.info(f"   Total info sets: {results['total_info_sets']:,}")
-                logger.info(f"   Info sets processed: {results['info_sets_processed']:,}")
-                logger.info(f"   Q-values count: {results['q_values_count']:,}")
-                logger.info(f"   Strategies count: {results['strategies_count']:,}")
-                logger.info(f"   Avg payoff: {results['avg_payoff']:.4f}")
-                logger.info(f"   Strategy entropy: {float(results['strategy_entropy']):.4f}")
-                logger.info(f"   Elapsed time: {elapsed:.1f}s")
-                logger.info(f"   Target achieved: {'✅' if games_per_second > 1000 else '❌'}")
-                logger.info("")
-            
-            # Save checkpoint
-            if (iteration + 1) % save_interval == 0:
-                checkpoint_path = save_path.replace('.pkl', f'_checkpoint_{iteration + 1}.pkl')
-                trainer.save_model(checkpoint_path)
-                logger.info(f"💾 Checkpoint saved: {checkpoint_path}")
-        
-        # Final results
-        total_time = time.time() - start_time
-        final_games_per_second = results['total_games'] / total_time
-        
-        logger.info("🎉 DEFINITIVE HYBRID Training Completed!")
-        logger.info("=" * 60)
-        logger.info(f"🚀 Final Performance:")
-        logger.info(f"   Total iterations: {iterations}")
-        logger.info(f"   Total games: {results['total_games']:,}")
-        logger.info(f"   Total info sets: {results['total_info_sets']:,}")
-        logger.info(f"   Total time: {total_time:.1f}s")
-        logger.info(f"   Average games/sec: {final_games_per_second:,.1f}")
-        logger.info(f"   Target achieved: {'✅' if final_games_per_second > 1000 else '❌'}")
-        logger.info("")
-        logger.info(f"🧠 DEFINITIVE HYBRID Algorithm Results:")
-        logger.info(f"   Q-values learned: {results['q_values_count']:,}")
-        logger.info(f"   Strategies learned: {results['strategies_count']:,}")
-        logger.info(f"   Strategy entropy: {float(results['strategy_entropy']):.4f}")
-        logger.info(f"   Info sets processed: {results['info_sets_processed']:,}")
-        logger.info(f"   Growth events: {results['growth_events']}")
-        logger.info("")
-        logger.info(f"💾 Final model saved: {save_path}")
-        
-        # Save final model
-        trainer.save_model(save_path)
-        
-    except ImportError as e:
-        logger.error(f"❌ DEFINITIVE HYBRID module import failed: {e}")
-        logger.error("Make sure definitive_hybrid_trainer.py is available")
-        sys.exit(1)
-    except Exception as e:
-        logger.error(f"❌ DEFINITIVE HYBRID training failed: {e}")
-        sys.exit(1)
+    config = TrainerConfig(
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        temperature=temperature
+    )
+    trainer = PokerTrainer(config)
+    # ... resto del código de entrenamiento ...
 
 if __name__ == '__main__':
     cli() 

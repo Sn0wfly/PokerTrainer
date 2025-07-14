@@ -35,8 +35,8 @@ except ImportError:
     logger.warning("⚠️ Cython fast hasher: NOT AVAILABLE, falling back to Python")
 
 @dataclass
-class DefinitiveHybridConfig:
-    """Configuration for Definitive Hybrid Trainer"""
+class TrainerConfig:
+    """Configuration for PokerTrainer"""
     batch_size: int = 8192
     learning_rate: float = 0.1
     temperature: float = 1.0
@@ -104,13 +104,13 @@ def _process_info_set_chunk(data_chunk: List[Tuple]) -> List[str]:
     
     return hashes
 
-class DefinitiveHybridTrainer:
+class PokerTrainer:
     """
-    🚀 DEFINITIVE HYBRID TRAINER
+    🚀 POKER TRAINER
     Combines vectorized GPU simulation with efficient CPU-GPU bridge
     """
     
-    def __init__(self, config: DefinitiveHybridConfig):
+    def __init__(self, config: TrainerConfig):
         self.config = config
         self.iteration = 0
         self.total_games = 0
@@ -412,7 +412,7 @@ class DefinitiveHybridTrainer:
 
 def benchmark_definitive_hybrid_performance():
     """Benchmark the definitive hybrid trainer performance"""
-    from .cli import batch_simulate_real_holdem
+    from .simulation import batch_simulate_real_holdem
     import jax.random as jr
     import time
     
@@ -420,13 +420,13 @@ def benchmark_definitive_hybrid_performance():
     logger.info("=" * 60)
     
     # Configuration
-    config = DefinitiveHybridConfig(
+    config = TrainerConfig(
         batch_size=8192,
         learning_rate=0.1,
         temperature=1.0
     )
     
-    trainer = DefinitiveHybridTrainer(config)
+    trainer = PokerTrainer(config)
     
     # Test configuration
     game_config = {
