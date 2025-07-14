@@ -156,9 +156,14 @@ class VectorizedCFVFPTrainer:
     @partial(jax.jit, static_argnums=(0,))
     def _vectorized_q_value_update(self, current_q: jnp.ndarray, 
                                   cf_values: jnp.ndarray,
-                                  learning_rate: float) -> jnp.ndarray:
-        """Vectorized Q-value update using JAX"""
-        updated_q = current_q + learning_rate * (cf_values - current_q)
+                                  learning_rate: float,
+                                  big_blind: float = 2.0) -> jnp.ndarray:
+        """Vectorized Q-value update using JAX with Kimi's normalization"""
+        # Kimi's normalization: r = (chips_won – baseline) / big_blind
+        baseline_reward = jnp.mean(cf_values)  # Baseline from current batch
+        normalized_cf_values = (cf_values - baseline_reward) / big_blind
+        
+        updated_q = current_q + learning_rate * (normalized_cf_values - current_q)
         return updated_q.astype(self.config.dtype)
     
     def train_step(self, rng_key: jax.random.PRNGKey, 
@@ -192,7 +197,8 @@ class VectorizedCFVFPTrainer:
         updated_q_subset = self._vectorized_q_value_update(
             current_q_subset, 
             cf_values_subset, 
-            self.config.learning_rate
+            self.config.learning_rate,
+            big_blind=2.0  # Kimi's normalization parameter
         )
         
         # Update Q-values
