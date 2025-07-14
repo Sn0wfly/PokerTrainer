@@ -48,6 +48,23 @@ def _static_vectorized_scatter_update(q_values: jnp.ndarray,
     🚀 PURE JIT-COMPILED FUNCTION: Maximum performance with dynamic shapes
     JAX will automatically recompile for new array shapes while maintaining speed
     """
+    # Ensure cf_values has the same dtype as q_values to avoid warnings
+    cf_values = cf_values.astype(q_values.dtype)
+    
+    # GATHER: Get current Q-values for indices
+    current_q_subset = q_values[indices]
+    
+    # UPDATE: Compute new Q-values
+    updated_q_subset = current_q_subset + learning_rate * (cf_values - current_q_subset)
+    
+    # SCATTER: Update Q-values
+    new_q_values = q_values.at[indices].set(updated_q_subset)
+    
+    # Update strategies
+    strategies_subset = jax.nn.softmax(updated_q_subset / temperature)
+    new_strategies = strategies.at[indices].set(strategies_subset)
+    
+    return new_q_values, new_strategies
     # GATHER: Get current Q-values for indices
     current_q_subset = q_values[indices]
     
