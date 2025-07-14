@@ -137,7 +137,7 @@ class HybridCFVFPTrainer:
     
     @partial(jax.jit, static_argnums=(0,))
     def _vectorized_info_set_processing(self, game_data: Dict[str, jnp.ndarray]) -> Dict[str, jnp.ndarray]:
-        """VECTORIZED info set processing on GPU"""
+        """VECTORIZED info set processing on GPU - returns only JAX arrays"""
         batch_size = game_data['payoffs'].shape[0]
         num_players = game_data['payoffs'].shape[1]
         total_info_sets = batch_size * num_players
@@ -174,32 +174,20 @@ class HybridCFVFPTrainer:
         
         cf_values = compute_cf_values_vectorized(flat_payoffs)
         
-        # Create info sets for tracking
-        info_sets = []
-        for i in range(total_info_sets):
-            player_id = i % num_players
-            game_idx = i // num_players
-            
-            info_set = InfoSet(
-                player_id=player_id,
-                position=player_id,  # Simplified
-                hole_cards=flat_hole_cards[i],
-                community_cards=flat_community[i],
-                pot_size=jnp.array(flat_final_pots[i], dtype=jnp.float32),
-                stack_size=100.0,  # Simplified
-                hand_strength=jnp.array(hand_strengths[i], dtype=jnp.float32),
-                phase=3,  # River (simplified)
-                betting_history=jnp.array([1, 1, 1])  # Simplified
-            )
-            info_sets.append(info_set)
+        # Create player IDs and game indices for later use
+        player_ids = jnp.arange(total_info_sets) % num_players
+        game_indices = jnp.arange(total_info_sets) // num_players
         
         return {
             'total_info_sets': total_info_sets,
             'cf_values': cf_values,
-            'info_sets': info_sets,
+            'hole_cards': flat_hole_cards,
+            'community_cards': flat_community,
+            'pot_sizes': flat_final_pots,
             'hand_strengths': hand_strengths,
             'payoffs': flat_payoffs,
-            'final_pots': flat_final_pots
+            'player_ids': player_ids,
+            'game_indices': game_indices
         }
     
     @partial(jax.jit, static_argnums=(0,))
@@ -230,11 +218,26 @@ class HybridCFVFPTrainer:
         
         # Process each info set individually (for growth tracking)
         cf_values = vectorized_results['cf_values']
-        info_sets = vectorized_results['info_sets']
+        hole_cards = vectorized_results['hole_cards']
+        community_cards = vectorized_results['community_cards']
+        pot_sizes = vectorized_results['pot_sizes']
+        hand_strengths = vectorized_results['hand_strengths']
+        player_ids = vectorized_results['player_ids']
         
-        # Track unique info sets and update indices
+        # Create InfoSet objects outside of JAX compilation
         indices_to_update = []
-        for i, info_set in enumerate(info_sets):
+        for i in range(vectorized_results['total_info_sets']):
+            info_set = InfoSet(
+                player_id=int(player_ids[i]),
+                position=int(player_ids[i]),  # Simplified
+                hole_cards=hole_cards[i],
+                community_cards=community_cards[i],
+                pot_size=float(pot_sizes[i]),
+                stack_size=100.0,  # Simplified
+                hand_strength=float(hand_strengths[i]),
+                phase=3,  # River (simplified)
+                betting_history=jnp.array([1, 1, 1])  # Simplified
+            )
             index = self._get_or_create_index(info_set)
             indices_to_update.append(index)
         
