@@ -23,6 +23,15 @@ from dataclasses import dataclass
 from functools import partial
 import time
 
+# 🚀 Import Cython module for ultra-fast hashing
+try:
+    from .fast_hasher import map_hashes_cython
+    CYTHON_AVAILABLE = True
+    logger.info("🚀 Cython fast hasher: ENABLED for maximum performance")
+except ImportError:
+    CYTHON_AVAILABLE = False
+    logger.warning("⚠️ Cython fast hasher: NOT AVAILABLE, falling back to Python")
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -245,19 +254,24 @@ class DefinitiveHybridTrainer:
             
             data_to_hash.append((player_id, hole_cards, community_cards, pot_size, payoff))
         
-        # Process chunks in parallel
-        num_processes = multiprocessing.cpu_count()
-        chunk_size = (total_info_sets + num_processes - 1) // num_processes
-        chunks = [data_to_hash[i:i + chunk_size] for i in range(0, total_info_sets, chunk_size)]
-        
-        logger.info(f"   🚀 MULTIPROCESSING: Using {num_processes} processes for {total_info_sets} info sets")
-        logger.info(f"   📊 Chunk size: {chunk_size} info sets per process")
-        
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            all_hashes = pool.map(_process_info_set_chunk, chunks)
-        
-        # Flatten the list of lists of hashes
-        all_hashes_flat = [h for sublist in all_hashes for h in sublist]
+        # 🚀 ULTRA-FAST HASHING: Use Cython for maximum performance
+        if CYTHON_AVAILABLE:
+            logger.info(f"   🚀 CYTHON HASHING: Processing {total_info_sets} info sets at C speed")
+            all_hashes_flat = map_hashes_cython(data_to_hash)
+        else:
+            # Fallback to multiprocessing if Cython not available
+            num_processes = multiprocessing.cpu_count()
+            chunk_size = (total_info_sets + num_processes - 1) // num_processes
+            chunks = [data_to_hash[i:i + chunk_size] for i in range(0, total_info_sets, chunk_size)]
+            
+            logger.info(f"   🚀 MULTIPROCESSING: Using {num_processes} processes for {total_info_sets} info sets")
+            logger.info(f"   📊 Chunk size: {chunk_size} info sets per process")
+            
+            with multiprocessing.Pool(processes=num_processes) as pool:
+                all_hashes = pool.map(_process_info_set_chunk, chunks)
+            
+            # Flatten the list of lists of hashes
+            all_hashes_flat = [h for sublist in all_hashes for h in sublist]
         
         # Get or create indices for all unique hashes
         indices_to_update = []
