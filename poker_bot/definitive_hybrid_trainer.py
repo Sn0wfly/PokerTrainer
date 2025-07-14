@@ -82,16 +82,17 @@ class DefinitiveHybridTrainer:
     
     def _grow_arrays(self):
         """Grow GPU arrays when full (CPU operation)"""
-        new_size = int(self.config.max_info_sets * self.config.growth_factor)
-        logger.info(f"🔄 Growing arrays from {self.config.max_info_sets:,} to {new_size:,}")
+        old_size = self.config.max_info_sets
+        new_size = int(old_size * self.config.growth_factor)
+        logger.info(f"🔄 Growing arrays from {old_size:,} to {new_size:,}")
         
         # Create new larger arrays
         new_q_values = jnp.zeros((new_size, self.config.num_actions), dtype=self.config.dtype)
         new_strategies = jnp.ones((new_size, self.config.num_actions), dtype=self.config.dtype) / self.config.num_actions
         
-        # Copy existing data
-        new_q_values = new_q_values.at[:self.config.max_info_sets].set(self.q_values)
-        new_strategies = new_strategies.at[:self.config.max_info_sets].set(self.strategies)
+        # Copy existing data using old_size
+        new_q_values = new_q_values.at[:old_size].set(self.q_values)
+        new_strategies = new_strategies.at[:old_size].set(self.strategies)
         
         # Update arrays
         self.q_values = new_q_values
