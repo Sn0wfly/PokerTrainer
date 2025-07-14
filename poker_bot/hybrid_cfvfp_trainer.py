@@ -185,9 +185,9 @@ class HybridCFVFPTrainer:
                 position=player_id,  # Simplified
                 hole_cards=flat_hole_cards[i],
                 community_cards=flat_community[i],
-                pot_size=float(flat_final_pots[i]),
+                pot_size=jnp.array(flat_final_pots[i], dtype=jnp.float32),
                 stack_size=100.0,  # Simplified
-                hand_strength=float(hand_strengths[i]),
+                hand_strength=jnp.array(hand_strengths[i], dtype=jnp.float32),
                 phase=3,  # River (simplified)
                 betting_history=jnp.array([1, 1, 1])  # Simplified
             )
