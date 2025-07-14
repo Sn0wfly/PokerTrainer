@@ -2111,7 +2111,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
                 logger.info(f"   Q-values count: {results['q_values_count']:,}")
                 logger.info(f"   Strategies count: {results['strategies_count']:,}")
                 logger.info(f"   Avg payoff: {float(results['avg_payoff']):.4f}")
-                logger.info(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
+                logger.info(f"   Strategy entropy: {float(results['strategy_entropy']):.4f}")
                 logger.info(f"   Elapsed time: {elapsed:.1f}s")
                 logger.info(f"   Target achieved: {'✅' if games_per_second > 1000 else '❌'}")
                 logger.info("")
