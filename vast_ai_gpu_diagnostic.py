@@ -82,7 +82,7 @@ def check_jax_gpu():
                     y = jnp.array([4.0, 5.0, 6.0])
                     z = x + y
                     print(f"✅ GPU operations work: {z}")
-                    print(f"✅ Device used: {x.device}")
+                    print(f"✅ Device used: {x.devices()}")
                 
                 return True
             else:
@@ -155,7 +155,7 @@ def check_poker_bot_gpu_usage():
         
         # Check which device is being used
         print(f"📱 Default device: {jax.default_backend()}")
-        print(f"📱 X device: {x.device}")
+        print(f"📱 X devices: {x.devices()}")
         
         # Test with poker bot modules
         try:
@@ -165,7 +165,7 @@ def check_poker_bot_gpu_usage():
             results = simple_nlhe_batch(rng_keys)
             
             print(f"✅ Poker bot operations work")
-            print(f"📊 Results device: {results['hole_cards'].device}")
+            print(f"📊 Results devices: {results['hole_cards'].devices()}")
             
             return True
             
