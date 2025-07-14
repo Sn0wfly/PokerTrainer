@@ -2021,38 +2021,38 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
     - Saves actual learned strategies, not fixed matrices
     """
     
-    # Import REAL CFVFP modules
+    # Import VECTORIZED CFVFP modules
     try:
-        from .real_cfvfp_trainer import RealCFVFPTrainer, RealCFVFPConfig
+        from .vectorized_cfvfp_trainer import VectorizedCFVFPTrainer, VectorizedCFVFPConfig
         import jax.random as jr
         import time
         import pickle
         import os
         
-        logger.info("🚀 Starting REAL CFVFP Training")
+        logger.info("🚀 Starting VECTORIZED CFVFP Training")
         logger.info("=" * 60)
-        logger.info(f"Algorithm: REAL CFVFP (NeurIPS 2024)")
+        logger.info(f"Algorithm: VECTORIZED CFVFP (GPU-accelerated)")
         logger.info(f"Target: Real NLHE 6-player strategies")
         logger.info(f"Iterations: {iterations}")
         logger.info(f"Batch size: {batch_size}")
         logger.info(f"Learning rate: {learning_rate}")
         logger.info(f"Temperature: {temperature}")
-        logger.info(f"Information sets: Dynamic (not fixed matrices)")
+        logger.info(f"GPU vectorization: FULL JAX acceleration")
         logger.info("")
         
         # Create models directory
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
-        # Initialize REAL CFVFP trainer
-        config = RealCFVFPConfig(
+        # Initialize VECTORIZED CFVFP trainer
+        config = VectorizedCFVFPConfig(
             batch_size=batch_size,
             learning_rate=learning_rate,
             temperature=temperature
         )
-        trainer = RealCFVFPTrainer(config)
+        trainer = VectorizedCFVFPTrainer(config)
         
         # Training loop
-        logger.info("🚀 Starting REAL CFVFP training loop...")
+        logger.info("🚀 Starting VECTORIZED CFVFP training loop...")
         start_time = time.time()
         rng_key = jr.PRNGKey(42)
         
@@ -2072,7 +2072,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         logger.info("   ✅ Warm-up compilation completed!")
         
         # Training loop
-        logger.info("🚀 REAL CFVFP Training Progress:")
+        logger.info("🚀 VECTORIZED CFVFP Training Progress:")
         logger.info("=" * 60)
         
         for iteration in range(iterations):
@@ -2091,7 +2091,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
                 'big_blind': 2.0
             }
             
-            # 🚀 REAL CFVFP Training Step
+            # 🚀 VECTORIZED CFVFP Training Step
             logger.info(f"   🎮 Running batch simulation...")
             game_results = batch_simulate_real_holdem(rng_keys, game_config)
             logger.info(f"   ✅ Simulation completed, running trainer step...")
@@ -2126,7 +2126,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         total_time = time.time() - start_time
         final_games_per_second = results['total_games'] / total_time
         
-        logger.info("🎉 REAL CFVFP Training Completed!")
+        logger.info("🎉 VECTORIZED CFVFP Training Completed!")
         logger.info("=" * 60)
         logger.info(f"🚀 Final Performance:")
         logger.info(f"   Total iterations: {iterations}")
@@ -2136,7 +2136,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         logger.info(f"   Average games/sec: {final_games_per_second:,.1f}")
         logger.info(f"   Target achieved: {'✅' if final_games_per_second > 1000 else '❌'}")
         logger.info("")
-        logger.info(f"🧠 REAL CFVFP Algorithm Results:")
+        logger.info(f"🧠 VECTORIZED CFVFP Algorithm Results:")
         logger.info(f"   Q-values learned: {results['q_values_count']:,}")
         logger.info(f"   Strategies learned: {results['strategies_count']:,}")
         logger.info(f"   Strategy entropy: {results['strategy_entropy']:.4f}")
@@ -2148,11 +2148,11 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         trainer.save_model(save_path)
         
     except ImportError as e:
-        logger.error(f"❌ REAL CFVFP module import failed: {e}")
-        logger.error("Make sure real_cfvfp_trainer.py is available")
+        logger.error(f"❌ VECTORIZED CFVFP module import failed: {e}")
+        logger.error("Make sure vectorized_cfvfp_trainer.py is available")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"❌ REAL CFVFP training failed: {e}")
+        logger.error(f"❌ VECTORIZED CFVFP training failed: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
