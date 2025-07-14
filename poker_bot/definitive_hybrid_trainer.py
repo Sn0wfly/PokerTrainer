@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from functools import partial
 import time
 
+logger = logging.getLogger(__name__)
+
 # 🚀 Import Cython module for ultra-fast hashing
 try:
     from .fast_hasher import map_hashes_cython
@@ -31,8 +33,6 @@ try:
 except ImportError:
     CYTHON_AVAILABLE = False
     logger.warning("⚠️ Cython fast hasher: NOT AVAILABLE, falling back to Python")
-
-logger = logging.getLogger(__name__)
 
 @dataclass
 class DefinitiveHybridConfig:
