@@ -4,6 +4,10 @@ jaxlib>=0.4.20
 numpy>=1.21.0
 scipy>=1.7.0
 
+# 🚀 Cython for ultra-fast CPU optimization (Fase 3)
+cython>=3.0.0
+setuptools>=65.0.0
+
 # Poker Hand Evaluation
 phevaluator>=0.5.3
 
