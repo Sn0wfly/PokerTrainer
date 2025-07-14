@@ -204,10 +204,10 @@ class DefinitiveHybridTrainer:
         
         return jnp.array(indices_to_update)
     
-    @partial(jax.jit, static_argnums=(0,))
     def _vectorized_scatter_update(self, indices: jnp.ndarray, cf_values: jnp.ndarray) -> Dict[str, jnp.ndarray]:
         """
         🚀 GPU SCATTER UPDATE: Update only necessary Q-values efficiently
+        Note: No JIT to allow dynamic array sizes
         """
         # GATHER: Get current Q-values for indices
         current_q_subset = self.q_values[indices]
