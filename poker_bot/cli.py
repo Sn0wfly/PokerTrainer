@@ -2025,12 +2025,13 @@ def vectorized_cfr_training(rng_keys: jnp.ndarray, game_config: Dict[str, Any]) 
 @click.option('--batch-size', default=8192, help='Batch size for training')
 @click.option('--learning-rate', default=0.1, help='Learning rate')
 @click.option('--temperature', default=1.0, help='Temperature for strategy computation')
+@click.option('--aggression', default=0.6, help='Aggression factor (0.0-1.0) for different playing styles')
 @click.option('--save-interval', default=1000, help='Save model every N iterations')
 @click.option('--log-interval', default=100, help='Log progress every N iterations')
 @click.option('--save-path', default='models/real_cfvfp_model.pkl', help='Path to save trained model')
 @click.option('--gpu/--no-gpu', default=True, help='Use GPU acceleration')
 def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperature: float,
-                save_interval: int, log_interval: int, save_path: str, gpu: bool):
+                aggression: float, save_interval: int, log_interval: int, save_path: str, gpu: bool):
     """
     🚀 REAL CFVFP Training: Counterfactual Value Based Fictitious Play
     Target: Real NLHE 6-player strategies with actual information sets
@@ -2058,6 +2059,7 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
         logger.info(f"Batch size: {batch_size}")
         logger.info(f"Learning rate: {learning_rate}")
         logger.info(f"Temperature: {temperature}")
+        logger.info(f"Aggression factor: {aggression} (λ = {aggression})")
         logger.info(f"GPU vectorization: FULL JAX acceleration")
         logger.info("")
         
@@ -2070,7 +2072,10 @@ def train_cfvfp(iterations: int, batch_size: int, learning_rate: float, temperat
             learning_rate=learning_rate,
             temperature=temperature
         )
+        
+        # Apply aggression factor to trainer
         trainer = VectorizedCFVFPTrainer(config)
+        trainer.aggression_factor = aggression  # Set aggression factor
         
         # Training loop
         logger.info("🚀 Starting VECTORIZED CFVFP training loop...")

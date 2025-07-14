@@ -41,29 +41,25 @@ class VectorizedCFVFPTrainer:
     """
     
     def __init__(self, config: VectorizedCFVFPConfig):
+        """Initialize vectorized CFVFP trainer"""
         self.config = config
-        
-        # VECTORIZED Q-VALUES: Use JAX arrays instead of Python dicts
-        # Shape: (max_info_sets, num_actions)
-        self.max_info_sets = 100000  # Pre-allocate for speed
-        self.q_values = jnp.zeros((self.max_info_sets, config.num_actions), dtype=config.dtype)
-        
-        # VECTORIZED STRATEGIES: Use JAX arrays
-        self.strategies = jnp.zeros((self.max_info_sets, config.num_actions), dtype=config.dtype)
-        
-        # Info set tracking
-        self.info_set_hashes = {}  # hash -> index mapping
-        self.next_info_set_idx = 0
-        
-        # Training state
         self.iteration = 0
         self.total_games = 0
         self.total_info_sets = 0
+        self.max_info_sets = 100000
         
-        logger.info(f"🚀 Vectorized CFVFP Trainer initialized")
+        # Initialize Q-values and strategies
+        self.q_values = jnp.zeros((self.max_info_sets, config.num_actions), dtype=config.dtype)
+        self.strategies = jnp.ones((self.max_info_sets, config.num_actions), dtype=config.dtype) / config.num_actions
+        
+        # Aggression factor for different playing styles
+        self.aggression_factor = 0.6  # Default balanced
+        
+        logger.info("🚀 Vectorized CFVFP Trainer initialized")
         logger.info(f"   Batch size: {config.batch_size}")
         logger.info(f"   Max info sets: {self.max_info_sets}")
         logger.info(f"   GPU vectorization: Enabled")
+        logger.info(f"   Aggression factor: {self.aggression_factor}")
     
     @partial(jax.jit, static_argnums=(0,))
     def _vectorized_info_set_processing(self, game_data: Dict[str, jnp.ndarray]) -> Dict[str, jnp.ndarray]:
@@ -204,8 +200,45 @@ class VectorizedCFVFPTrainer:
         # Update Q-values
         self.q_values = self.q_values.at[:num_to_update].set(updated_q_subset)
         
-        # Compute strategies vectorized
-        strategies_subset = jax.nn.softmax(updated_q_subset / self.config.temperature)
+        # Compute strategies vectorized with aggression factor
+        # Higher aggression = more aggressive strategies
+        base_strategies = jax.nn.softmax(updated_q_subset / self.config.temperature)
+        
+        # Apply aggression factor: shift probability mass toward aggressive actions
+        # Actions: [FOLD, CALL, BET, RAISE] - indices 2,3 are aggressive
+        if self.aggression_factor > 0.5:
+            # More aggressive: increase BET and RAISE probabilities
+            aggression_boost = (self.aggression_factor - 0.5) * 2  # 0 to 1
+            aggressive_actions = base_strategies[:, 2:]  # BET, RAISE
+            passive_actions = base_strategies[:, :2]     # FOLD, CALL
+            
+            # Boost aggressive actions
+            aggressive_boosted = aggressive_actions * (1 + aggression_boost)
+            passive_reduced = passive_actions * (1 - aggression_boost * 0.5)
+            
+            # Renormalize
+            total_prob = jnp.sum(aggressive_boosted, axis=1, keepdims=True) + jnp.sum(passive_reduced, axis=1, keepdims=True)
+            aggressive_boosted = aggressive_boosted / total_prob
+            passive_reduced = passive_reduced / total_prob
+            
+            strategies_subset = jnp.concatenate([passive_reduced, aggressive_boosted], axis=1)
+        else:
+            # More conservative: increase FOLD and CALL probabilities
+            conservatism_boost = (0.5 - self.aggression_factor) * 2  # 0 to 1
+            aggressive_actions = base_strategies[:, 2:]  # BET, RAISE
+            passive_actions = base_strategies[:, :2]     # FOLD, CALL
+            
+            # Boost passive actions
+            passive_boosted = passive_actions * (1 + conservatism_boost)
+            aggressive_reduced = aggressive_actions * (1 - conservatism_boost * 0.5)
+            
+            # Renormalize
+            total_prob = jnp.sum(passive_boosted, axis=1, keepdims=True) + jnp.sum(aggressive_reduced, axis=1, keepdims=True)
+            passive_boosted = passive_boosted / total_prob
+            aggressive_reduced = aggressive_reduced / total_prob
+            
+            strategies_subset = jnp.concatenate([passive_boosted, aggressive_reduced], axis=1)
+        
         self.strategies = self.strategies.at[:num_to_update].set(strategies_subset)
         
         # Update counters
