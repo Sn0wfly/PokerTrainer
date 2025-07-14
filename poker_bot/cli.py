@@ -1248,7 +1248,7 @@ def play(model: str, hands: int, opponents: int, stack: float,
         sys.exit(1)
 
 @cli.command()
-@click.option('--model', default='models/real_cfvfp_model.pkl', help='Path to trained model')
+@click.option('--model', default='models/real_cfvfp_model_checkpoint_10000.pkl', help='Path to trained model')
 @click.option('--hands', default=3, help='Number of hands to visualize')
 def visualize(model: str, hands: int):
     """Quick visualization of how the bot plays"""

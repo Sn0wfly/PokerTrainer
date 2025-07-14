@@ -119,26 +119,63 @@ class PokerVisualizer:
         if not self.model:
             return random.choice(["FOLD", "CALL", "BET $6", "RAISE $12"])
         
-        # Simple action selection based on model
-        actions = ["FOLD", "CALL", "BET", "RAISE"]
-        weights = [0.2, 0.3, 0.3, 0.2]  # Conservative strategy
+        try:
+            # Create info set hash from game state
+            info_set = self._create_info_set(hole_cards, community_cards, street)
+            
+            # Get strategy from model if available
+            if hasattr(self.model, 'strategies') and info_set in self.model.strategies:
+                strategy = self.model.strategies[info_set]
+                action_probs = strategy / jnp.sum(strategy)
+                
+                # Choose action based on probabilities
+                actions = ["FOLD", "CALL", "BET", "RAISE"]
+                action_idx = jnp.argmax(action_probs)
+                action = actions[action_idx]
+                
+                logger.info(f"   📊 Strategy: {action_probs}")
+                logger.info(f"   🎯 Chosen: {action}")
+                
+            else:
+                # Fallback to model-based decision
+                actions = ["FOLD", "CALL", "BET", "RAISE"]
+                weights = [0.2, 0.3, 0.3, 0.2]  # Conservative strategy
+                
+                # Adjust based on street
+                if street == "preflop":
+                    weights = [0.1, 0.4, 0.3, 0.2]  # More aggressive preflop
+                elif street == "river":
+                    weights = [0.3, 0.4, 0.2, 0.1]  # More conservative on river
+                
+                action = random.choices(actions, weights=weights)[0]
+            
+            # Format action with bet sizing
+            if action == "BET":
+                bet_size = min(pot_size * 0.75, 12)
+                return f"BET ${bet_size:.0f}"
+            elif action == "RAISE":
+                raise_size = min(pot_size * 1.5, 18)
+                return f"RAISE ${raise_size:.0f}"
+            else:
+                return action
+                
+        except Exception as e:
+            # Fallback to random if model fails
+            return random.choice(["FOLD", "CALL", "BET $6", "RAISE $12"])
+    
+    def _create_info_set(self, hole_cards: List[str], community_cards: List[str], street: str) -> str:
+        """Create info set hash for the game state"""
+        # Convert cards to indices for consistency with training
+        card_to_idx = {
+            '2': 0, '3': 1, '4': 2, '5': 3, '6': 4, '7': 5, '8': 6, '9': 7, '10': 8, 'J': 9, 'Q': 10, 'K': 11, 'A': 12
+        }
         
-        # Adjust based on street
-        if street == "preflop":
-            weights = [0.1, 0.4, 0.3, 0.2]  # More aggressive preflop
-        elif street == "river":
-            weights = [0.3, 0.4, 0.2, 0.1]  # More conservative on river
+        # Create simple hash
+        hole_str = "".join([card.replace('♠', '').replace('♥', '').replace('♦', '').replace('♣', '') for card in hole_cards])
+        community_str = "".join([card.replace('♠', '').replace('♥', '').replace('♦', '').replace('♣', '') for card in community_cards])
         
-        action = random.choices(actions, weights=weights)[0]
-        
-        if action == "BET":
-            bet_size = min(pot_size * 0.75, 12)
-            return f"BET ${bet_size:.0f}"
-        elif action == "RAISE":
-            raise_size = min(pot_size * 1.5, 18)
-            return f"RAISE ${raise_size:.0f}"
-        else:
-            return action
+        info_set = f"{street}:{hole_str}:{community_str}"
+        return info_set
 
 def quick_visualize(model_path: str = "models/real_cfvfp_model.pkl", hands: int = 3):
     """Quick visualization of bot play"""
