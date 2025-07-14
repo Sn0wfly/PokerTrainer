@@ -7,6 +7,7 @@ Key Innovations:
 - Efficient CPU-GPU bridge for memory management
 - Scatter-gather updates for optimal GPU usage
 - Dynamic growth with minimal CPU overhead
+- PURE JIT functions for maximum performance
 """
 
 import jax
@@ -15,7 +16,7 @@ import numpy as np
 import hashlib
 import pickle
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from functools import partial
 import time
@@ -34,6 +35,33 @@ class DefinitiveHybridConfig:
     max_info_sets: int = 1000000  # 1M info sets max
     growth_factor: float = 1.5  # Grow by 50% when full
     chunk_size: int = 5000  # Process CPU work in chunks
+
+# 🚀 PURE JIT-COMPILED FUNCTION (Outside class for maximum performance)
+@partial(jax.jit, static_argnums=(4, 5))
+def _static_vectorized_scatter_update(q_values: jnp.ndarray, 
+                                    strategies: jnp.ndarray,
+                                    indices: jnp.ndarray, 
+                                    cf_values: jnp.ndarray,
+                                    learning_rate: float,
+                                    temperature: float) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    🚀 PURE JIT-COMPILED FUNCTION: Maximum performance with dynamic shapes
+    JAX will automatically recompile for new array shapes while maintaining speed
+    """
+    # GATHER: Get current Q-values for indices
+    current_q_subset = q_values[indices]
+    
+    # UPDATE: Compute new Q-values
+    updated_q_subset = current_q_subset + learning_rate * (cf_values - current_q_subset)
+    
+    # SCATTER: Update Q-values
+    new_q_values = q_values.at[indices].set(updated_q_subset)
+    
+    # Update strategies
+    strategies_subset = jax.nn.softmax(updated_q_subset / temperature)
+    new_strategies = strategies.at[indices].set(strategies_subset)
+    
+    return new_q_values, new_strategies
 
 class DefinitiveHybridTrainer:
     """
@@ -64,6 +92,7 @@ class DefinitiveHybridTrainer:
         logger.info(f"   Growth factor: {config.growth_factor}")
         logger.info(f"   Chunk size: {config.chunk_size}")
         logger.info(f"   Target: Real NLHE 6-player strategies with optimal GPU-CPU bridge")
+        logger.info(f"   🚀 PURE JIT functions: ENABLED for maximum performance")
     
     def _get_or_create_index(self, info_hash: str) -> int:
         """Get or create index for info set hash (CPU operation)"""
@@ -204,30 +233,24 @@ class DefinitiveHybridTrainer:
         
         return jnp.array(indices_to_update)
     
-    def _vectorized_scatter_update(self, indices: jnp.ndarray, cf_values: jnp.ndarray) -> Dict[str, jnp.ndarray]:
+    def _vectorized_scatter_update(self, indices: jnp.ndarray, cf_values: jnp.ndarray) -> None:
         """
         🚀 GPU SCATTER UPDATE: Update only necessary Q-values efficiently
-        Note: No JIT to allow dynamic array sizes
+        Now uses PURE JIT function for maximum performance
         """
-        # GATHER: Get current Q-values for indices
-        current_q_subset = self.q_values[indices]
+        # Call the PURE JIT-compiled function
+        new_q_values, new_strategies = _static_vectorized_scatter_update(
+            self.q_values,
+            self.strategies,
+            indices,
+            cf_values,
+            self.config.learning_rate,
+            self.config.temperature
+        )
         
-        # UPDATE: Compute new Q-values
-        updated_q_subset = current_q_subset + self.config.learning_rate * (cf_values - current_q_subset)
-        
-        # SCATTER: Update Q-values
-        new_q_values = self.q_values.at[indices].set(updated_q_subset)
-        
-        # Update strategies
-        strategies_subset = jax.nn.softmax(updated_q_subset / self.config.temperature)
-        new_strategies = self.strategies.at[indices].set(strategies_subset)
-        
-        return {
-            'q_values': new_q_values,
-            'strategies': new_strategies,
-            'updated_indices': indices,
-            'cf_values': cf_values
-        }
+        # Update arrays (JAX will handle the shape changes automatically)
+        self.q_values = new_q_values
+        self.strategies = new_strategies
     
     def train_step(self, rng_key: jax.random.PRNGKey, 
                    game_results: Dict[str, jnp.ndarray]) -> Dict[str, Any]:
@@ -253,11 +276,7 @@ class DefinitiveHybridTrainer:
         
         # 3. 🚀 GPU SCATTER UPDATE: Update only necessary values
         if len(indices) > 0:
-            update_results = self._vectorized_scatter_update(indices, cf_values[:len(indices)])
-            
-            # Update arrays
-            self.q_values = update_results['q_values']
-            self.strategies = update_results['strategies']
+            self._vectorized_scatter_update(indices, cf_values[:len(indices)])
         
         # Update counters
         self.total_info_sets += len(indices)
@@ -267,7 +286,9 @@ class DefinitiveHybridTrainer:
         
         # Calculate strategy entropy
         if len(indices) > 0:
-            entropy = -jnp.sum(update_results['strategies'] * jnp.log(update_results['strategies'] + 1e-8), axis=1)
+            # Get strategies for the updated indices
+            strategies_subset = self.strategies[indices]
+            entropy = -jnp.sum(strategies_subset * jnp.log(strategies_subset + 1e-8), axis=1)
             avg_entropy = jnp.mean(entropy)
         else:
             avg_entropy = 0.0
